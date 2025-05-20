@@ -16,7 +16,7 @@ from ...options import Options
 from ...result import Result, Saved
 from ...utils.vectorization import slindbladian
 from .abstract_integrator import BaseIntegrator
-from .interfaces import AbstractTimeInterface, MEInterface, SEInterface, SolveInterface
+from .interfaces import AbstractTimeInterface, MEInterface, FPMEInterface, SEInterface, SolveInterface
 from .save_mixin import AbstractSaveMixin, PropagatorSaveMixin, SolveSaveMixin
 
 
@@ -303,7 +303,6 @@ class MEDiffraxIntegrator(DiffraxIntegrator, MEInterface):
 
         return dx.ODETerm(vector_field)
 
-
 class MESolveDiffraxIntegrator(MEDiffraxIntegrator, SolveSaveMixin, SolveInterface):
     """Integrator computing the time evolution of the Lindblad master equation using the
     Diffrax library.
@@ -328,6 +327,64 @@ mesolve_kvaerno3_integrator_constructor = partial(
 mesolve_kvaerno5_integrator_constructor = partial(
     MESolveDiffraxIntegrator, diffrax_solver=dx.Kvaerno5(), fixed_step=False
 )
+
+class FPMEDiffraxIntegrator(DiffraxIntegrator, FPMEInterface):
+    """Integrator solving the Fokker-Planck Lindblad master equation with Diffrax."""
+
+    @property
+    def terms(self) -> dx.AbstractTerm:
+        # define Lindblad term drho/dt
+
+        # The Lindblad equation for a single loss channel is:
+        # (1) drho/dt = -i [H, rho] + L @ rho @ Ld - 0.5 Ld @ L @ rho - 0.5 rho @ Ld @ L
+        # An alternative but similar equation is:
+        # (2) drho/dt = (-i H @ rho + 0.5 L @ rho @ Ld - 0.5 Ld @ L @ rho) + h.c.
+        # While (1) and (2) are equivalent assuming that rho is hermitian, they differ
+        # once you take into account numerical errors.
+        # Decomposing rho = rho_s + rho_a with Hermitian rho_s and anti-Hermitian rho_a,
+        # we get that:
+        #  - if rho evolves according to (1), both rho_s and rho_a also evolve
+        #    according to (1);
+        #  - if rho evolves according to (2), rho_s evolves closely to (1) up
+        #    to a constant error that depends on rho_a (which is small up to numerical
+        #    precision), while rho_a is strictly constant.
+        # In practice, we still use (2) because it involves less matrix multiplications,
+        # and is thus more efficient numerically with only a negligible numerical error
+        # induced on the dynamics.
+
+        def vector_field(t, y, _):  # noqa: ANN001, ANN202
+            L, H, FP, FPH, FPO = self.L(t), self.H(t), self.FP(t), self.FPH(t), self.FPO(t)
+            Hnh = -1j * H + sum([-0.5 * _L.dag() @ _L for _L in L])
+            tmp = (Hnh @ y + sum([0.5 * _L @ y @ _L.dag() for _L in L]) 
+                   +sum([_FPO.einsum((-1j*_FPH)@y, _axes) for _FPH, _FPO, axes in zip(FPH, FPO, self.FPOaxes)]))
+            return tmp + tmp.dag() + sum([_FP.einsum(y, _axes) for _FP, _axes in zip(FP, self.FPaxes)])
+
+        return dx.ODETerm(vector_field)
+
+class FPMESolveDiffraxIntegrator(FPMEDiffraxIntegrator, SolveSaveMixin, SolveInterface):
+    """Integrator computing the time evolution of the Lindblad master equation using the
+    Diffrax library.
+    """
+
+fpmesolve_euler_integrator_constructor = partial(
+    FPMESolveDiffraxIntegrator, diffrax_solver=dx.Euler(), fixed_step=True
+)
+fpmesolve_dopri5_integrator_constructor = partial(
+    FPMESolveDiffraxIntegrator, diffrax_solver=dx.Dopri5(), fixed_step=False
+)
+fpmesolve_dopri8_integrator_constructor = partial(
+    FPMESolveDiffraxIntegrator, diffrax_solver=dx.Dopri8(), fixed_step=False
+)
+fpmesolve_tsit5_integrator_constructor = partial(
+    FPMESolveDiffraxIntegrator, diffrax_solver=dx.Tsit5(), fixed_step=False
+)
+fpmesolve_kvaerno3_integrator_constructor = partial(
+    FPMESolveDiffraxIntegrator, diffrax_solver=dx.Kvaerno3(), fixed_step=False
+)
+fpmesolve_kvaerno5_integrator_constructor = partial(
+    FPMESolveDiffraxIntegrator, diffrax_solver=dx.Kvaerno5(), fixed_step=False
+)
+
 
 
 class MEPropagatorDiffraxIntegrator(

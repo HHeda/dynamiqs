@@ -83,6 +83,13 @@ def check_options(options: Options, solver_name: str):
             't0',
             'save_extra',
         ),
+        'fpmesolve': (
+            'save_states',
+            'cartesian_batching',
+            'progress_meter',
+            't0',
+            'save_extra',
+        ),
         'sepropagator': ('save_propagators', 'progress_meter', 't0', 'save_extra'),
         'mepropagator': ('save_propagators', 'cartesian_batching', 't0', 'save_extra'),
         'floquet': ('progress_meter', 't0'),

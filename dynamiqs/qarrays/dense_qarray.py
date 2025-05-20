@@ -225,6 +225,21 @@ class DenseQArray(QArray):
     def elpow(self, power: int) -> QArray:
         data = self.data**power
         return self._replace(data=data)
+    
+    def einsum(self, y: QArrayLike,
+              axes: Sequence[int] = 2) -> QArray | Array:
+        self_axes, y_axes, res_axes = ([0, 1], list(range(2, 2+y.ndim)), list(range(2, 2+y.ndim)))
+        self_axes[axes[0]] = -1
+        y_axes[axes[1]] = -1
+        res_axes[axes[1]] = 1 - axes[0]
+        print(self_axes, y_axes, res_axes)
+        if isinstance(y, DenseQArray):
+            data = jnp.einsum(self.to_jax(), self_axes, y.data, y_axes, res_axes)
+        elif isqarraylike(y):
+            data = jnp.einsum(self.to_jax(), self_axes, to_jax(y), y_axes, res_axes)
+        else:
+            return NotImplemented
+        return y._replace(data=data)
 
     def __getitem__(self, key: int | slice) -> QArray:
         data = self.data[key]

@@ -630,6 +630,19 @@ class QArray(eqx.Module):
         """
 
     @abstractmethod
+    def einsum(self, y: QArrayLike, 
+              axes: Sequence[int] = 2) -> QArray | Array:
+        """Computes the specific eintein summation of self (assumed to be a square 2D tensor) with y along the axes specified by `axes`.
+
+        Args:
+            y: Qarray-like to contract with
+
+        Returns:
+            New qarray corresponding to the contraction along the specified axes.
+        """
+        pass
+
+    @abstractmethod
     def __getitem__(self, key: int | slice) -> QArray:
         pass
 

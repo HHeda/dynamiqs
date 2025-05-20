@@ -187,6 +187,8 @@ class SESolveResult(SolveResult):
 class MESolveResult(SolveResult):
     pass
 
+class FPMESolveResult(SolveResult):
+    pass
 
 class SEPropagatorResult(PropagatorResult):
     pass

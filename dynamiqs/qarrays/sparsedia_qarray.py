@@ -345,6 +345,10 @@ class SparseDIAQArray(QArray):
     def elpow(self, power: int) -> QArray:
         diags = self.diags**power
         return self._replace(diags=diags)
+    
+    def einsum(self, y: QArrayLike, 
+              axes: Sequence[int] = 2) -> QArray | Array:
+        return self.asdense().einsum(y, axes=axes)
 
     def __getitem__(self, key: int | slice | tuple) -> QArray:
         if key in (slice(None, None, None), Ellipsis):
