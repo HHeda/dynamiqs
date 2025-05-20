@@ -232,7 +232,6 @@ class DenseQArray(QArray):
         self_axes[axes[0]] = -1
         y_axes[axes[1]] = -1
         res_axes[axes[1]] = 1 - axes[0]
-        print(self_axes, y_axes, res_axes)
         if isinstance(y, DenseQArray):
             data = jnp.einsum(self.to_jax(), self_axes, y.data, y_axes, res_axes)
         elif isqarraylike(y):

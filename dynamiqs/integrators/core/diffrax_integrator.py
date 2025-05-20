@@ -356,8 +356,8 @@ class FPMEDiffraxIntegrator(DiffraxIntegrator, FPMEInterface):
             L, H, FP, FPH, FPO = self.L(t), self.H(t), self.FP(t), self.FPH(t), self.FPO(t)
             Hnh = -1j * H + sum([-0.5 * _L.dag() @ _L for _L in L])
             tmp = (Hnh @ y + sum([0.5 * _L @ y @ _L.dag() for _L in L]) 
-                   +sum([_FPO.einsum((-1j*_FPH)@y, _axes) for _FPH, _FPO, axes in zip(FPH, FPO, self.FPOaxes)]))
-            return tmp + tmp.dag() + sum([_FP.einsum(y, _axes) for _FP, _axes in zip(FP, self.FPaxes)])
+                   +sum([_FPO.einsum((-1j*_FPH)@y, _axes) for (_FPH, _FPO, _axes) in zip(FPH, FPO, self.FPOaxes)]))
+            return tmp + tmp.dag() + sum([_FP.einsum(y, _axes) for (_FP, _axes) in zip(FP, self.FPaxes)])
 
         return dx.ODETerm(vector_field)
 
