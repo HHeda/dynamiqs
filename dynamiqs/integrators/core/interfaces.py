@@ -74,6 +74,43 @@ class FPMEInterface(AbstractTimeInterface):
         ts = [x.discontinuity_ts for x in [self.H, *self.Ls]]
         return concatenate_sort(*ts)
 
+class MRMEInterface(AbstractTimeInterface):
+    """Interface for the Lindblad master equation."""
+
+    H: TimeQArray
+    Ls: list[TimeQArray]
+    watched_Ls: list[TimeQArray]
+    #etas: list(float)
+    #modes: Sequence[Sequence[callable[[float], Scalar | Array]]] # Modes in the form v(t) = f(t)/n(t)
+   # MaxNs:  Sequence[Sequence[int]] # Maximum number of photons for each mode
+    k = 0
+    # self.laxis = []
+    # for c in self.modes:
+    #     self.laxis.extend([d + k for d in c])
+    #     k += len(c)
+        
+    
+    
+    
+    def L(self, t: Scalar) -> list[QArray]:
+        return [_L(t) for _L in self.Ls]  # (nLs, n, n)
+    def watched_L(self, t: Scalar) -> list[QArray]:
+        return [_watched_L(t) for _watched_L in self.watched_L]
+    def D(self, t: Scalar) -> list[QArray]: # Derivatives
+        return [_D(t) for _D in self.D]  # (nLs, n, n)
+    def x(self, t: Scalar) -> list[QArray]: # x operators
+        return [_x(t) for x in self.x]  # (nLs, n, n)
+    def FP(self, t: Scalar) -> list[QArray]:
+        return [_FP(t) for _FP in self.FPs]  # (nLs, n, n)
+    def FPH(self, t: Scalar) -> list[QArray]:
+        return [_FPH(t) for _FPH in self.FPHs]  # (nLs, n, n)
+    def FPO(self, t: Scalar) -> list[QArray]:
+        return [_FPO(t) for _FPO in self.FPOs]  # (nLs, n, n)
+
+    @property
+    def discontinuity_ts(self) -> Array:
+        ts = [x.discontinuity_ts for x in [self.H, *self.Ls]]
+        return concatenate_sort(*ts)
 
 class JSSEInterface(MEInterface):
     """Interface for the jump SSE."""
