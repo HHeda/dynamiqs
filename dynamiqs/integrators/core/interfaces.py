@@ -55,10 +55,10 @@ class FPMEInterface(AbstractTimeInterface):
     H: TimeQArray
     Ls: list[TimeQArray]
     FPs: list[TimeQArray] #Fokker-Plack operators
-    FPaxes:  Sequence[Sequence[int]] #Axes on wich they operate
+    FPaxes:  Sequence[Sequence[ArrayLike]] #Axes on wich they operate
     FPHs: list[TimeQArray] #Hamiltonians to be composed with Fokker-Planck operators
     FPOs: list[TimeQArray] #Fokker-Plack operators that compose with Hamiltonians
-    FPOaxes: Sequence[Sequence[int]] # Axes on wich they operate
+    FPOaxes: Sequence[Sequence[ArrayLike]] # Axes on wich they operate
 
     def L(self, t: Scalar) -> list[QArray]:
         return [_L(t) for _L in self.Ls]  # (nLs, n, n)

@@ -55,6 +55,7 @@ def fpmesolve(
     FPaxes: Sequence[Sequence[int]],
     rho0: QArrayLike,
     tsave: ArrayLike,
+    n_extra_dims = int,
     *,
     exp_ops: list[QArrayLike] | None = None,
     method: Method = Tsit5(),  # noqa: B008
@@ -242,12 +243,12 @@ def fpmesolve(
 
     # we implement the jitted vectorization in another function to pre-convert QuTiP
     # objects (which are not JIT-compatible) to qarrays
-    return _fpmesolve(H, Ls, FPHs, FPOs, FPOaxes, FPs, FPaxes, rho0, tsave, exp_ops, method, gradient, options)
-    return _vectorized_fpmesolve(H, Ls, FPHs, FPOs, FPOaxes, FPs, FPaxes, rho0, tsave, exp_ops, method, gradient, options)
+    # return _fpmesolve(H, Ls, FPHs, FPOs, FPOaxes, FPs, FPaxes, rho0, tsave, exp_ops, method, gradient, options)
+    return _vectorized_fpmesolve(H, Ls, FPHs, FPOs, FPOaxes, FPs, FPaxes, rho0, tsave, n_extra_dims, exp_ops, method, gradient, options)
 
 
 @catch_xla_runtime_error
-@partial(jax.jit, static_argnames=('gradient', 'options'))
+@partial(jax.jit, static_argnames=('FPOaxes', 'FPaxes', 'n_extra_dims', 'gradient', 'options'))
 def _vectorized_fpmesolve(
     H: TimeQArray,
     Ls: list[TimeQArray],
@@ -258,26 +259,43 @@ def _vectorized_fpmesolve(
     FPaxes: Sequence[Sequence[int]],
     rho0: QArray,
     tsave: Array,
+    n_extra_dims: int,
     exp_ops: list[QArray] | None,
     method: Method,
     gradient: Gradient | None,
     options: Options,
 ) -> FPMESolveResult:
     # vectorize input over H, Ls and rho0
-    in_axes = (H.in_axes, [L.in_axes for L in Ls], 0, None, None, None, None, None)
+    in_axes = (H.in_axes, 
+               [L.in_axes for L in Ls], 
+               [FPH.in_axes for FPH in FPH_ops],
+               [FPO.in_axes for FPO in FPO_ops], None,
+                [FP.in_axes for FP in FP_ops], None,
+               0, None, None, None, None, None)
     out_axes = FPMESolveResult.out_axes()
 
     if options.cartesian_batching:
-        nvmap = (H.ndim - 2, [L.ndim - 2 for L in Ls], rho0.ndim - 2, 0, 0, 0, 0, 0)
+        print('dada')
+        nvmap = (H.ndim - 2, 
+                 [L.ndim - 2 for L in Ls], 
+                 [FPH.ndim - 2 for FPH in FPH_ops],
+                 [FPO.ndim - 2 for FPO in FPO_ops], 0,
+                 [FP.ndim - 2 for FP in FP_ops], 0,
+                 rho0.ndim - 2 - n_extra_dims,
+                   0, 0, 0, 0, 0)
         f = cartesian_vmap(_fpmesolve, in_axes, out_axes, nvmap)
     else:
-        bshape = jnp.broadcast_shapes(*[x.shape[:-2] for x in [H, *Ls, rho0]])
+        shapes = [x.shape[:-2] for x in [H, *Ls, *FPH_ops, *FPO_ops, *FP_ops]]+[rho0.shape[:-2-n_extra_dims]]
+        bshape = jnp.broadcast_shapes(*shapes)
         nvmap = len(bshape)
         # broadcast all vectorized input to same shape
         n = H.shape[-1]
         H = H.broadcast_to(*bshape, n, n)
         Ls = [L.broadcast_to(*bshape, n, n) for L in Ls]
-        rho0 = rho0.broadcast_to(*bshape, n, n)
+        FPH_ops = [FPH.broadcast_to(*bshape, FPH.shape[-1], FPH.shape[-1]) for FPH in FPH_ops]
+        FPO_ops = [FPO.broadcast_to(*bshape, FPO.shape[-1], FPO.shape[-1]) for FPO in FPO_ops]
+        FP_ops = [FP.broadcast_to(*bshape, FP.shape[-1], FP.shape[-1]) for FP in FP_ops]
+        rho0 = rho0.broadcast_to(*bshape, *(rho0.shape[-2-n_extra_dims:]))
         # vectorize the function
         f = multi_vmap(_fpmesolve, in_axes, out_axes, nvmap)
 
