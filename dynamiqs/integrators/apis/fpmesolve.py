@@ -275,7 +275,6 @@ def _vectorized_fpmesolve(
     out_axes = FPMESolveResult.out_axes()
 
     if options.cartesian_batching:
-        print('dada')
         nvmap = (H.ndim - 2, 
                  [L.ndim - 2 for L in Ls], 
                  [FPH.ndim - 2 for FPH in FPH_ops],
