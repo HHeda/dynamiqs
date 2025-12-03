@@ -23,6 +23,7 @@ __all__ = [
     'Rouchon1',
     'Rouchon2',
     'Rouchon3',
+    'Rouchon4',
     'Tsit5',
     'Event',
 ]
@@ -361,6 +362,43 @@ class Rouchon3(_DEFixedStep, _DEAdaptiveStep):
         _DEAdaptiveStep.__init__(
             self, rtol, atol, safety_factor, min_factor, max_factor, max_steps
         )
+        self.normalize = normalize
+        self.exact_expm = exact_expm
+
+class Rouchon4(_DEFixedStep):
+    r"""fourth-order Rouchon method (fixed step size ODE/SDE method).
+
+    Args:
+        dt: Fixed time step.
+        normalize: If True, the scheme is trace-preserving to machine precision, which
+            is the recommended option because it is much more stable. Otherwise, it is
+            only trace-preserving to the scheme order in $\dt$.
+        exact_expm: If True, the scheme uses the exact matrix exponential internally (at
+            the cost of losing sparsity), otherwise it uses a Taylor expansion up to
+            the scheme order.
+
+    Note-: Supported gradients
+        This method supports differentiation with
+        [`dq.gradient.Direct`][dynamiqs.gradient.Direct],
+        [`dq.gradient.BackwardCheckpointed`][dynamiqs.gradient.BackwardCheckpointed]
+        (default)
+        and [`dq.gradient.Forward`][dynamiqs.gradient.Forward].
+    """
+
+    SUPPORTED_GRADIENT: ClassVar[_TupleGradient] = (
+        Direct,
+        BackwardCheckpointed,
+        Forward,
+    )
+
+    # todo: fix static dt (similar issue as static tsave in dssesolve)
+    dt: float = eqx.field(static=True)
+    normalize: bool = eqx.field(static=True, default=True)
+    exact_expm: bool = eqx.field(static=True, default=False)
+
+    # dummy init to have the signature in the documentation
+    def __init__(self, dt: float, normalize: bool = True, exact_expm: bool = False):
+        super().__init__(dt)
         self.normalize = normalize
         self.exact_expm = exact_expm
 
