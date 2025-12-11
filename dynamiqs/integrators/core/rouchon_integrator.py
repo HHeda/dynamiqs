@@ -127,7 +127,12 @@ def compute_partial_S(rho: QArray, Mss: Sequence[Sequence[QArray]]) -> QArray:
 
 
 def interp3(
-    theta: float, dt: float, U0: QArray, U1: QArray, f0: QArray, f1: QArray
+    theta: RealScalarLike,
+    dt: RealScalarLike,
+    U0: QArray,
+    U1: QArray,
+    f0: QArray,
+    f1: QArray,
 ) -> QArray:
     # Cubic Hermite interpolation: p(theta) with constraints:
     # p(0) = U0, p(1) = U1, p'(0) = dt*f0, p'(1) = dt*f1
@@ -139,7 +144,9 @@ def interp3(
     return h00 * U0 + h01 * U1 + dt * (h10 * f0 + h11 * f1)
 
 
-def interp2(theta: float, dt: float, U0: QArray, U1: QArray, f0: QArray) -> QArray:
+def interp2(
+    theta: RealScalarLike, dt: RealScalarLike, U0: QArray, U1: QArray, f0: QArray
+) -> QArray:
     # Quadratic Hermite interpolation: p(theta) = a0 + a1*theta + a2*theta^2
     # Constraints: p(0)=U0, p(1)=U1, p'(0)=dt*f0
     a0 = U0
@@ -190,7 +197,7 @@ def interp4(theta, y_n, y_np1, k1, k3, k4, k5, k6, k7):
     return r1 + theta * (r2 + (1 - theta) * (r3 + theta * (r4 + (1 - theta) * r5)))
 
 
-def propagator(U1, U2):
+def propagator(U1, U2, time_independent=False) -> QArray:
     """Compute the propagator from t2 to t1 using LU factorization.
 
     U1: propagator from 0 to t1
@@ -216,9 +223,9 @@ thetas_L1 = [[(1 - jnp.sqrt(3 / 5)) / 2], [1 / 2], [(1 + jnp.sqrt(3 / 5)) / 2]]
 # the values at which evaluate the evolution operators for 1 jump
 thetas_U1 = np.array(
     [
-        [[1, (1 - jnp.sqrt(3 / 5)) / 2], [(1 - jnp.sqrt(3 / 5)) / 2, 0]],
+        [[1, (1 - np.sqrt(3 / 5)) / 2], [(1 - np.sqrt(3 / 5)) / 2, 0]],
         [[1, 1 / 2], [1 / 2, 0]],
-        [[1, (1 + jnp.sqrt(3 / 5)) / 2], [(1 + jnp.sqrt(3 / 5)) / 2, 0]],
+        [[1, (1 + np.sqrt(3 / 5)) / 2], [(1 + np.sqrt(3 / 5)) / 2, 0]],
     ]
 )
 weights_1 = [5 / 18, 8 / 18, 5 / 18]
@@ -306,9 +313,17 @@ thetas_U3 = np.array(
         tetra_points_cartesian_extended.T[:, 1:],
     ]
 ).transpose(1, 2, 0)
-# the values at which evaluate the jump operators for 3 jumps
+
+# the values at which evaluate the jump operators for 4 jumps
 thetas_L3 = tetra_points_cartesian.T
 weights_3 = tetra_weights
+
+
+thetas_L4 = [[1 / 5, 2 / 5, 3 / 5, 4 / 5]]
+
+# the values at which evaluate the evolution operators for 1 jump
+thetas_U4 = np.array([[[1.0, 0.8], [0.8, 0.6], [0.6, 0.4], [0.4, 0.2], [0.2, 0.0]]])
+weights_4 = [1 / 24]
 
 
 # -- collect all θ utilisés dans thetas_U{1,2,3} --
@@ -320,6 +335,7 @@ theta_values = []
 theta_values += flatten_thetas(thetas_U1)
 theta_values += flatten_thetas(thetas_U2)
 theta_values += flatten_thetas(thetas_U3)
+theta_values += flatten_thetas(thetas_U4)
 
 unique_thetas = []
 seen = set()
@@ -344,9 +360,9 @@ def collect_pairs(thetas):
 
 
 pair_list = []
-for src in (thetas_U1, thetas_U2, thetas_U3):
+for src in (thetas_U1, thetas_U2, thetas_U3, thetas_U4):
     for p in collect_pairs(src):
-        if p not in pair_list:
+        if p not in pair_list and p[0] != 0.0:  # avoid (_,  0)
             pair_list.append(p)
 
 pair_to_idx = {p: i for i, p in enumerate(pair_list)}
@@ -377,17 +393,17 @@ class MESolveFixedRouchonIntegrator(MESolveDiffraxIntegrator):
 
         return AbstractRouchonTerm(kraus_map)
 
-    def _kraus_ops(self, t: float, dt: float) -> Sequence[QArray]:
-        return self.Msss(self.H, self.L, t, dt, self.method.exact_expm)
+    def _kraus_ops(self, t: RealScalarLike, dt: RealScalarLike) -> Sequence[QArray]:
+        return self.Msss(self.H, self.L, t, dt, self.method.time_independent)
 
     @staticmethod
     @abstractmethod
     def Msss(
         H: Callable[[RealScalarLike], QArray],
         L: Callable[[RealScalarLike], Sequence[QArray]],
-        t: float,
-        dt: float,
-        exact_expm: bool,
+        t: RealScalarLike,
+        dt: RealScalarLike,
+        time_independent: bool,
     ) -> Sequence[QArray]:
         pass
 
@@ -401,20 +417,21 @@ class MESolveFixedRouchon1Integrator(MESolveFixedRouchonIntegrator):
     def Msss(
         H: Callable[[RealScalarLike], QArray],
         L: Callable[[RealScalarLike], Sequence[QArray]],
-        t: float,
-        dt: float,
-        exact_expm: bool,
+        t: RealScalarLike,
+        dt: RealScalarLike,
+        time_independent: bool,
     ) -> Sequence[Sequence[Sequence[QArray]]]:
-        if exact_expm:
+        if time_independent:
             pass
-        Lmid, Hmid = L(t + dt / 2), H(t + dt / 2)
-        U0 = eye_like(Hmid)
+
+        L0, H0 = L(t + dt / 2), H(t + dt / 2)
+        U0 = eye_like(H0)
         # M0 = I - (iH + 0.5 sum_k Lk^† @ Lk) dt
         # Mk = Lk sqrt(dt)
-        LdL = sum([_L.dag() @ _L for _L in Lmid])
-        G = -1j * Hmid - 0.5 * LdL
-        e1 = (dt * G).expm() if exact_expm else U0 + dt * G
-        return [[[e1]], [[jnp.sqrt(dt) * _L for _L in Lmid]]]
+        LdL = sum([_L.dag() @ _L for _L in L0])
+        G = -1j * H0 - 0.5 * LdL
+        e1 = U0 + dt * G
+        return [[[e1]], [[jnp.sqrt(dt) * _L for _L in L0]]]
 
 
 mesolve_rouchon1_integrator_constructor = (
@@ -433,11 +450,11 @@ class MESolveFixedRouchon2Integrator(MESolveFixedRouchonIntegrator):
     def Msss(
         H: Callable[[RealScalarLike], QArray],
         L: Callable[[RealScalarLike], Sequence[QArray]],
-        t: float,
-        dt: float,
-        exact_expm: bool,
+        t: RealScalarLike,
+        dt: RealScalarLike,
+        time_independent: bool,
     ) -> Sequence[Sequence[Sequence[QArray]]]:
-        if exact_expm:
+        if time_independent:
             pass
         U0 = eye_like(H(t))
         # Sample generators
@@ -445,22 +462,22 @@ class MESolveFixedRouchon2Integrator(MESolveFixedRouchonIntegrator):
         Gmid = -1j * H(t + 0.5 * dt) - 0.5 * sum(
             [_L.dag() @ _L for _L in L(t + 0.5 * dt)]
         )
-
         # RK2 stages exploiting U0 = I:
         # k1 = G0
         # k2 = Gmid @ (I + (dt/2) k1)
         k1 = U0 + dt / 2 * G0
         U1 = U0 + dt * Gmid @ (k1)
-        emid = (U0 + U1) / 2
         # RK2 weights: b = [0, 1]
         # U1 = U0 + dt * k2
 
         e1 = U1
         Lmid = L(t + 0.5 * dt)
+
         J0 = [[[e1]]]
-        J1 = [[[jnp.sqrt(dt) * propagator(U1, emid) @ _L @ emid for _L in Lmid]]]
+        J1a = [[[jnp.sqrt(dt / 2) * e1 @ _L for _L in L(t)]]]
+        J1b = [[[jnp.sqrt(dt / 2) * _L @ e1 for _L in L(t + dt)]]]
         J2 = [[[jnp.sqrt(dt**2 / 2) * _L1 for _L1 in Lmid], Lmid]]
-        return [*J0, *J1, *J2]
+        return [*J0, *J1a, *J1b, *J2]
 
 
 class MESolveFixedRouchon3Integrator(MESolveFixedRouchonIntegrator):
@@ -472,12 +489,10 @@ class MESolveFixedRouchon3Integrator(MESolveFixedRouchonIntegrator):
     def Msss(
         H: Callable[[RealScalarLike], QArray],
         L: Callable[[RealScalarLike], Sequence[QArray]],
-        t: float,
-        dt: float,
-        exact_expm: bool,
+        t: RealScalarLike,
+        dt: RealScalarLike,
+        time_independent: bool,
     ) -> Sequence[Sequence[Sequence[QArray]]]:
-        if exact_expm:
-            pass
         U0 = eye_like(H(t))
         # Sample generators
         G0 = -1j * H(t) - 0.5 * sum([_L.dag() @ _L for _L in L(t)])
@@ -496,8 +511,21 @@ class MESolveFixedRouchon3Integrator(MESolveFixedRouchonIntegrator):
         # Derivative at t0 for dense output
         f0 = k1
 
-        e1o3 = interp2(1 / 3, dt, U0, U1, f0)
-        e2o3 = interp2(2 / 3, dt, U0, U1, f0)
+        def U_at(theta: RealScalarLike) -> QArray:
+            return interp2(theta, dt, U0, U1, f0)
+
+        def solve_prop(th1: RealScalarLike, th2: RealScalarLike) -> QArray:
+            if not time_independent:
+                U1 = U_at(th1)
+                U2 = U_at(th2)
+                return asqarray(
+                    jnp.linalg.solve(U2.to_jax().T, U1.to_jax().T).T, dims=U1.dims
+                )
+            else:
+                return U_at(th1 - th2)
+
+        e1o3 = U_at(1 / 3)
+        e2o3 = U_at(2 / 3)
         e3o3 = U1
         L0o3 = L(t)
         L1o3 = L(t + 1 / 3 * dt)
@@ -506,7 +534,7 @@ class MESolveFixedRouchon3Integrator(MESolveFixedRouchonIntegrator):
         L2o4 = L(t + dt / 2)
         L3o4 = L(t + 3 * dt / 4)
         # L3o3 = self.L(t+dt)
-        e2o3_to_e3o3 = propagator(U1, e2o3)
+        e2o3_to_e3o3 = solve_prop(1, 2 / 3)
 
         J0 = [[[e3o3]]]
         J1a = [[[(jnp.sqrt(3 * dt / 4) * e2o3_to_e3o3 @ _L @ e2o3) for _L in L2o3]]]
@@ -514,7 +542,7 @@ class MESolveFixedRouchon3Integrator(MESolveFixedRouchonIntegrator):
         J2 = [
             [
                 [jnp.sqrt(dt**2 / 2) * e2o3_to_e3o3 @ _L1 for _L1 in L2o3],
-                [propagator(e2o3, e1o3) @ _L2 @ e1o3 for _L2 in L1o3],
+                [solve_prop(2 / 3, 1 / 3) @ _L2 @ e1o3 for _L2 in L1o3],
             ]
         ]
         J3 = [[[jnp.sqrt(dt**3 / 6) * _L1 for _L1 in L3o4], L2o4, L1o4]]
@@ -530,12 +558,10 @@ class MESolveFixedRouchon4Integrator(MESolveFixedRouchonIntegrator):
     def Msss(
         H: Callable[[RealScalarLike], QArray],
         L: Callable[[RealScalarLike], Sequence[QArray]],
-        t: float,
-        dt: float,
-        exact_expm: bool,
+        t: RealScalarLike,
+        dt: RealScalarLike,
+        time_independent: bool,
     ) -> Sequence[Sequence[Sequence[QArray]]]:
-        if exact_expm:
-            pass
         U0 = eye_like(H(t))
         # Sample generators
         G0 = -1j * H(t) - 0.5 * sum([_L.dag() @ _L for _L in L(t)])
@@ -556,16 +582,28 @@ class MESolveFixedRouchon4Integrator(MESolveFixedRouchonIntegrator):
         # Derivative at t1 for dense output
         f1 = G1 @ U1
 
-        e1o4 = interp3(1 / 4, dt, U0, U1, f0, f1)
-        e2o4 = interp3(2 / 4, dt, U0, U1, f0, f1)
-        e3o4 = interp3(3 / 4, dt, U0, U1, f0, f1)
+        def U_at(theta: RealScalarLike) -> QArray:
+            return interp3(theta, dt, U0, U1, f0, f1)
+
+        def solve_prop(th1: RealScalarLike, th2: RealScalarLike) -> QArray:
+            if not time_independent:
+                U1 = U_at(th1)
+                U2 = U_at(th2)
+                return asqarray(
+                    jnp.linalg.solve(U2.to_jax().T, U1.to_jax().T).T, dims=U1.dims
+                )
+            else:
+                return U_at(th1 - th2)
+
+        e1o4 = U_at(1 / 4)
+        e2o4 = U_at(2 / 4)
         e4o4 = U1
         o3m = (3 - jnp.sqrt(3)) / 6
         o3p = (3 + jnp.sqrt(3)) / 6
-        e1o3m = interp3(o3m, dt, U0, U1, f0, f1)
-        e1o3p = interp3(o3p, dt, U0, U1, f0, f1)
-        e3o4_to_e4o4 = propagator(U1, e3o4)
-        e2o4_to_e3o4 = propagator(e3o4, e2o4)
+        e1o3m = U_at(o3m)
+        e1o3p = U_at(o3p)
+        e3o4_to_e4o4 = solve_prop(1, 3 / 4)
+        e2o4_to_e3o4 = solve_prop(3 / 4, 2 / 4)
 
         Lt0 = L(t)
         Lt1o3p = L(t + o3p * dt)
@@ -583,15 +621,15 @@ class MESolveFixedRouchon4Integrator(MESolveFixedRouchonIntegrator):
         J0 = [[[e4o4]]]
         # 1 jumps: 2 operators
         J1a = [
-            [[jnp.sqrt(dt / 2) * propagator(U1, e1o3p) @ _L @ e1o3p for _L in Lt1o3p]]
+            [[jnp.sqrt(dt / 2) * solve_prop(1.0, o3p) @ _L @ e1o3p for _L in Lt1o3p]]
         ]
         J1b = [
-            [[jnp.sqrt(dt / 2) * propagator(U1, e1o3m) @ _L @ e1o3m for _L in Lt1o3m]]
+            [[jnp.sqrt(dt / 2) * solve_prop(1.0, o3m) @ _L @ e1o3m for _L in Lt1o3m]]
         ]
         # 2 jumps: 3 operators
         J2a = [
             [
-                [jnp.sqrt(dt**2 / 9) * propagator(U1, e1o4) @ _L1 for _L1 in Lt1o4],
+                [jnp.sqrt(dt**2 / 9) * solve_prop(1, 1 / 4) @ _L1 for _L1 in Lt1o4],
                 [e1o4 @ _L2 for _L2 in Lt0],
             ]
         ]
@@ -607,7 +645,7 @@ class MESolveFixedRouchon4Integrator(MESolveFixedRouchonIntegrator):
             [
                 [jnp.sqrt(dt**3 / 6) * e3o4_to_e4o4 @ _L1 for _L1 in Lt3o4],
                 [e2o4_to_e3o4 @ _L2 for _L2 in Lt2o4],
-                [propagator(e2o4, e1o4) @ _L3 @ e1o4 for _L3 in Lt1o4],
+                [solve_prop(1 / 2, 1 / 4) @ _L3 @ e1o4 for _L3 in Lt1o4],
             ]
         ]
         # 4 jumps: 1 operators
@@ -622,23 +660,18 @@ class MESolveFixedRouchon5Integrator(MESolveFixedRouchonIntegrator):
     """
 
     @staticmethod
-    def Msss(
+    def _compute_rk5_stages(
         H: Callable[[RealScalarLike], QArray],
         L: Callable[[RealScalarLike], Sequence[QArray]],
-        t: float,
-        dt: float,
-        exact_expm: bool,
-    ) -> Sequence[Sequence[Sequence[QArray]]]:
-        if exact_expm:
-            pass
-        U0 = eye_like(H(t))
-
-        # define time-dependent generator G(tau) = -i H(t+tau) - 0.5 sum L^† L
-        def G_at(theta: float) -> QArray:
+        t: RealScalarLike,
+        dt: RealScalarLike,
+    ) -> Sequence[QArray, QArray, QArray, QArray, QArray, QArray, QArray, QArray]:
+        def G_at(theta: RealScalarLike) -> QArray:
             return -1j * H(t + theta * dt) - 0.5 * sum(
                 [_L.dag() @ _L for _L in L(t + theta * dt)]
             )
 
+        U0 = eye_like(H(t))
         # Dormand-Prince 5(4) (DOPRI5) coefficients for an explicit RK5
         c2, c3, c4, c5, c6 = 1 / 5, 3 / 10, 4 / 5, 8 / 9, 1.0
         a21 = 1 / 5
@@ -684,26 +717,54 @@ class MESolveFixedRouchon5Integrator(MESolveFixedRouchonIntegrator):
 
         U1 = U0 + dt * (b1 * d1 + b3 * d3 + b4 * d4 + b5 * d5 + b6 * d6)
 
-        def U_at(theta: float) -> QArray:
+        return U0, U1, d1, d3, d4, d5, d6, d7
+
+    @staticmethod
+    def Msss(
+        H: Callable[[RealScalarLike], QArray],
+        L: Callable[[RealScalarLike], Sequence[QArray]],
+        t: RealScalarLike,
+        dt: RealScalarLike,
+        time_independent: bool,
+    ) -> Sequence[Sequence[Sequence[QArray]]]:
+        # define time-dependent generator G(tau) = -i H(t+tau) - 0.5 sum L^† L
+
+        U0, U1, d1, d3, d4, d5, d6, d7 = (
+            MESolveFixedRouchon5Integrator._compute_rk5_stages(H, L, t, dt)
+        )
+
+        def U_at(theta: RealScalarLike) -> QArray:
             return interp4(
                 theta, U0, U1, dt * d1, dt * d3, dt * d4, dt * d5, dt * d6, dt * d7
             )
 
-        stacked_U = jnp.stack([U_at(th).to_jax() for th in unique_thetas])
+        if time_independent:
+            stacked_U = []
+        else:
+            stacked_U = jnp.stack([U_at(th).to_jax() for th in unique_thetas])
 
-        def solve_prop(th1: float, th2: float) -> jnp.ndarray:
-            U1 = stacked_U[theta_to_idx[th1]]
-            if th2 == 0:
-                return U_at(th1).to_jax()
-            U2 = stacked_U[theta_to_idx[th2]]
-            return jnp.linalg.solve(U2.T, U1.T).T
+        def solve_prop(th1: RealScalarLike, th2: RealScalarLike) -> jnp.ndarray:
+            if not time_independent:
+                U1 = stacked_U[theta_to_idx[th1]]
+                U2 = stacked_U[theta_to_idx[th2]]
+                return jnp.linalg.solve(U2.T, U1.T).T
+            else:
+                return U_at(th1 - th2).to_jax()
 
-        stacked_prop = jnp.stack([solve_prop(a, b) for (a, b) in pair_list])
-        sample_dims = U0.dims
-        stacked_prop_q = [asqarray(mat, dims=sample_dims) for mat in stacked_prop]
+        if not time_independent:
+            stacked_prop = jnp.stack([solve_prop(a, b) for (a, b) in pair_list])
+            sample_dims = U0.dims
+            stacked_prop_q = [asqarray(mat, dims=sample_dims) for mat in stacked_prop]
+        else:
+            stacked_prop_q = []
+            sample_dims = U0.dims
+            stacked_prop_q = []
 
-        def get_prop(theta1: float, theta2: float) -> QArray:
-            return stacked_prop_q[pair_to_idx[(float(theta1), float(theta2))]]
+        def get_prop(theta1: RealScalarLike, theta2: RealScalarLike) -> QArray:
+            if time_independent:
+                return U_at(theta1 - theta2)
+            else:
+                return stacked_prop_q[pair_to_idx[(float(theta1), float(theta2))]]
 
         # 0 jump: 1 operator
         J0 = [[[U1]]]
@@ -715,7 +776,7 @@ class MESolveFixedRouchon5Integrator(MESolveFixedRouchonIntegrator):
                         jnp.sqrt(dt * w)
                         * get_prop(theta_U[0, 0], theta_U[0, 1])
                         @ _L
-                        @ get_prop(theta_U[1, 0], theta_U[1, 1])
+                        @ U_at(theta_U[1, 0])
                     )
                     for _L in L(t + theta_L[0] * dt)
                 ]
@@ -736,10 +797,7 @@ class MESolveFixedRouchon5Integrator(MESolveFixedRouchonIntegrator):
                     )
                     for _L1 in L(t + theta_L[0] * dt)
                 ],
-                [
-                    (_L2 @ get_prop(theta_U[2, 0], theta_U[2, 1]))
-                    for _L2 in L(t + theta_L[1] * dt)
-                ],
+                [(_L2 @ U_at(theta_U[2, 0])) for _L2 in L(t + theta_L[1] * dt)],
             ]
             for (w, theta_U, theta_L) in zip(
                 weights_2, thetas_U2, thetas_L2, strict=True
@@ -761,10 +819,7 @@ class MESolveFixedRouchon5Integrator(MESolveFixedRouchonIntegrator):
                     (_L2 @ get_prop(theta_U[2, 0], theta_U[2, 1]))
                     for _L2 in L(t + theta_L[1] * dt)
                 ],
-                [
-                    _L3 @ get_prop(theta_U[3, 0], theta_U[3, 1])
-                    for _L3 in L(t + theta_L[2] * dt)
-                ],
+                [_L3 @ U_at(theta_U[3, 0]) for _L3 in L(t + theta_L[2] * dt)],
             ]
             for (w, theta_U, theta_L) in zip(
                 weights_3, thetas_U3, thetas_L3, strict=True
@@ -776,21 +831,15 @@ class MESolveFixedRouchon5Integrator(MESolveFixedRouchonIntegrator):
                 [
                     (
                         jnp.sqrt(dt**4 / 24)
-                        * propagator(U1, U_at(4 / 5))
+                        * get_prop(1.0, 4.0 / 5.0)
                         @ _L1
-                        @ propagator(U_at(4 / 5), U_at(3 / 5))
+                        @ get_prop(4.0 / 5.0, 3.0 / 5.0)
                     )
-                    for _L1 in L(t + 3 / 5 * dt)
+                    for _L1 in L(t + 3.0 / 5.0 * dt)
                 ],
-                [
-                    _L2 @ propagator(U_at(3 / 5), U_at(2 / 5))
-                    for _L2 in L(t + 3 / 5 * dt)
-                ],
-                [
-                    _L3 @ propagator(U_at(2 / 5), U_at(1 / 5))
-                    for _L3 in L(t + 2 / 5 * dt)
-                ],
-                [_L4 @ U_at(1 / 5) for _L4 in L(t + 1 / 5 * dt)],
+                [_L2 @ get_prop(3.0 / 5.0, 2.0 / 5.0) for _L2 in L(t + 3.0 / 5.0 * dt)],
+                [_L3 @ get_prop(2.0 / 5.0, 1.0 / 5.0) for _L3 in L(t + 2.0 / 5.0 * dt)],
+                [_L4 @ U_at(1.0 / 5.0) for _L4 in L(t + 1.0 / 5.0 * dt)],
             ]
         ]
         # 5 jumps: 1 operator
@@ -843,14 +892,14 @@ class MESolveAdaptiveRouchon2Integrator(MESolveAdaptiveRouchonIntegrator):
 
             # === first order
             Msss_1 = MESolveFixedRouchon1Integrator.Msss(
-                H, L, t, dt, self.method.exact_expm
+                H, L, t, dt, self.method.time_independent
             )
             rho_1 = cholesky_normalize(Msss_1, rho) if self.method.normalize else rho
             rho_1 = sum([apply_nested_map(rho_1, Mss) for Mss in Msss_1])
 
             # === second order
             Msss_2 = MESolveFixedRouchon2Integrator.Msss(
-                H, L, t, dt, self.method.exact_expm
+                H, L, t, dt, self.method.time_independent
             )
             rho_2 = cholesky_normalize(Msss_2, rho) if self.method.normalize else rho
             rho_2 = sum([apply_nested_map(rho_2, Mss) for Mss in Msss_2])
@@ -876,14 +925,14 @@ class MESolveAdaptiveRouchon3Integrator(MESolveAdaptiveRouchonIntegrator):
 
             # === second order
             Msss_2 = MESolveFixedRouchon2Integrator.Msss(
-                H, L, t, dt, self.method.exact_expm
+                H, L, t, dt, self.method.time_independent
             )
             rho_2 = cholesky_normalize(Msss_2, rho) if self.method.normalize else rho
             rho_2 = sum([apply_nested_map(rho_2, Mss) for Mss in Msss_2])
 
             # === third order
             Msss_3 = MESolveFixedRouchon3Integrator.Msss(
-                H, L, t, dt, self.method.exact_expm
+                H, L, t, dt, self.method.time_independent
             )
             rho_3 = cholesky_normalize(Msss_3, rho) if self.method.normalize else rho
             rho_3 = sum([apply_nested_map(rho_3, Mss) for Mss in Msss_3])
@@ -908,14 +957,14 @@ class MESolveAdaptiveRouchon4Integrator(MESolveAdaptiveRouchonIntegrator):
 
             # === third order
             Msss_3 = MESolveFixedRouchon3Integrator.Msss(
-                H, L, t, dt, self.method.exact_expm
+                H, L, t, dt, self.method.time_independent
             )
             rho_3 = cholesky_normalize(Msss_3, rho) if self.method.normalize else rho
             rho_3 = sum([apply_nested_map(rho_3, Mss) for Mss in Msss_3])
 
             # === fourth order
             Msss_4 = MESolveFixedRouchon4Integrator.Msss(
-                H, L, t, dt, self.method.exact_expm
+                H, L, t, dt, self.method.time_independent
             )
             rho_4 = cholesky_normalize(Msss_4, rho) if self.method.normalize else rho
             rho_4 = sum([apply_nested_map(rho_4, Mss) for Mss in Msss_4])
@@ -940,14 +989,14 @@ class MESolveAdaptiveRouchon5Integrator(MESolveAdaptiveRouchonIntegrator):
 
             # === fourth order
             Msss_4 = MESolveFixedRouchon4Integrator.Msss(
-                H, L, t, dt, self.method.exact_expm
+                H, L, t, dt, self.method.time_independent
             )
             rho_4 = cholesky_normalize(Msss_4, rho) if self.method.normalize else rho
             rho_4 = sum([apply_nested_map(rho_4, Mss) for Mss in Msss_4])
 
             # === fifth order
             Msss_5 = MESolveFixedRouchon5Integrator.Msss(
-                H, L, t, dt, self.method.exact_expm
+                H, L, t, dt, self.method.time_independent
             )
             rho_5 = cholesky_normalize(Msss_5, rho) if self.method.normalize else rho
             rho_5 = sum([apply_nested_map(rho_5, Mss) for Mss in Msss_5])

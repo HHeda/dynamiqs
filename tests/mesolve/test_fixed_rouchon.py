@@ -25,9 +25,11 @@ class TestMESolveFixedRouchon(IntegratorTester):
             (Rouchon5, 1e-2),
         ],
     )
-    @pytest.mark.parametrize('system', [dense_ocavity, otdqubit])
-    def test_correctness(self, method_class, dt, system):
-        method = method_class(dt=dt)
+    @pytest.mark.parametrize(
+        ('system', 'time_independent'), [(dense_ocavity, True), (otdqubit, False)]
+    )
+    def test_correctness(self, method_class, dt, system, time_independent):
+        method = method_class(dt=dt, time_independent=time_independent)
         self._test_correctness(system, method)
 
     @pytest.mark.parametrize(
@@ -40,8 +42,10 @@ class TestMESolveFixedRouchon(IntegratorTester):
             (Rouchon5, 1e-2),
         ],
     )
-    @pytest.mark.parametrize('system', [dense_ocavity, otdqubit])
+    @pytest.mark.parametrize(
+        ('system', 'time_independent'), [(dense_ocavity, True), (otdqubit, False)]
+    )
     @pytest.mark.parametrize('gradient', [Direct(), BackwardCheckpointed(), Forward()])
-    def test_gradient(self, method_class, dt, system, gradient):
-        method = method_class(dt=dt)
+    def test_gradient(self, method_class, dt, system, time_independent, gradient):
+        method = method_class(dt=dt, time_independent=time_independent)
         self._test_gradient(system, method, gradient)

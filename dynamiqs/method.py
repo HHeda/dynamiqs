@@ -209,9 +209,8 @@ class Rouchon1(_DEFixedStep):
         normalize: If True, the scheme is trace-preserving to machine precision, which
             is the recommended option because it is much more stable. Otherwise, it is
             only trace-preserving to the scheme order in $\dt$.
-        exact_expm: If True, the scheme uses the exact matrix exponential internally (at
-            the cost of losing sparsity), otherwise it uses a Taylor expansion up to
-            the scheme order.
+        time_independent: If True, the scheme assumes time-independent operators.
+
 
     Note-: Supported gradients
         This method supports differentiation with
@@ -230,13 +229,15 @@ class Rouchon1(_DEFixedStep):
     # todo: fix static dt (similar issue as static tsave in dssesolve)
     dt: float = eqx.field(static=True)
     normalize: bool = eqx.field(static=True, default=True)
-    exact_expm: bool = eqx.field(static=True, default=False)
+    time_independent: bool = eqx.field(static=True, default=False)
 
     # dummy init to have the signature in the documentation
-    def __init__(self, dt: float, normalize: bool = True, exact_expm: bool = False):
+    def __init__(
+        self, dt: float, normalize: bool = True, time_independent: bool = False
+    ):
         super().__init__(dt)
         self.normalize = normalize
-        self.exact_expm = exact_expm
+        self.time_independent = time_independent
 
 
 class Rouchon2(_DEFixedStep, _DEAdaptiveStep):
@@ -261,9 +262,7 @@ class Rouchon2(_DEFixedStep, _DEAdaptiveStep):
         normalize: If True, the scheme is trace-preserving to machine precision, which
             is the recommended option because it is much more stable. Otherwise, it is
             only trace-preserving to the scheme order in the numerical step size.
-        exact_expm: If True, the scheme uses the exact matrix exponential internally (at
-            the cost of losing sparsity), otherwise it uses a Taylor expansion up to
-            the scheme order.
+        time_independent: If True, the scheme assumes time-independent operators
 
     Note-: Supported gradients
         This method supports differentiation with
@@ -280,7 +279,7 @@ class Rouchon2(_DEFixedStep, _DEAdaptiveStep):
     )
 
     normalize: bool = eqx.field(static=True, default=True)
-    exact_expm: bool = eqx.field(static=True, default=False)
+    time_independent: bool = eqx.field(static=True, default=False)
 
     # dummy init to have the signature in the documentation
     def __init__(
@@ -293,14 +292,14 @@ class Rouchon2(_DEFixedStep, _DEAdaptiveStep):
         max_steps: int = 100_000,
         dt: float | None = None,
         normalize: bool = True,
-        exact_expm: bool = False,
+        time_independent: bool = False,
     ):
         _DEFixedStep.__init__(self, dt)  # ty: ignore[invalid-argument-type]
         _DEAdaptiveStep.__init__(
             self, rtol, atol, safety_factor, min_factor, max_factor, max_steps
         )
         self.normalize = normalize
-        self.exact_expm = exact_expm
+        self.time_independent = time_independent
 
 
 class Rouchon3(_DEFixedStep, _DEAdaptiveStep):
@@ -325,9 +324,7 @@ class Rouchon3(_DEFixedStep, _DEAdaptiveStep):
         normalize: If True, the scheme is trace-preserving to machine precision, which
             is the recommended option because it is much more stable. Otherwise, it is
             only trace-preserving to the scheme order in the numerical step size.
-        exact_expm: If True, the scheme uses the exact matrix exponential internally (at
-            the cost of losing sparsity), otherwise it uses a Taylor expansion up to
-            the scheme order.
+        time_independent: If True, the scheme assumes time-independent operators.
 
     Note-: Supported gradients
         This method supports differentiation with
@@ -344,7 +341,7 @@ class Rouchon3(_DEFixedStep, _DEAdaptiveStep):
     )
 
     normalize: bool = eqx.field(static=True, default=True)
-    exact_expm: bool = eqx.field(static=True, default=False)
+    time_independent: bool = eqx.field(static=True, default=False)
 
     # dummy init to have the signature in the documentation
     def __init__(
@@ -357,14 +354,14 @@ class Rouchon3(_DEFixedStep, _DEAdaptiveStep):
         max_steps: int = 100_000,
         dt: float | None = None,
         normalize: bool = True,
-        exact_expm: bool = False,
+        time_independent: bool = False,
     ):
         _DEFixedStep.__init__(self, dt)  # ty: ignore[invalid-argument-type]
         _DEAdaptiveStep.__init__(
             self, rtol, atol, safety_factor, min_factor, max_factor, max_steps
         )
         self.normalize = normalize
-        self.exact_expm = exact_expm
+        self.time_independent = time_independent
 
 
 class Rouchon4(_DEFixedStep, _DEAdaptiveStep):
@@ -389,9 +386,8 @@ class Rouchon4(_DEFixedStep, _DEAdaptiveStep):
         normalize: If True, the scheme is trace-preserving to machine precision, which
             is the recommended option because it is much more stable. Otherwise, it is
             only trace-preserving to the scheme order in the numerical step size.
-        exact_expm: If True, the scheme uses the exact matrix exponential internally (at
-            the cost of losing sparsity), otherwise it uses a Taylor expansion up to
-            the scheme order.
+        time_independent: If True, the scheme assumes time-independent operators.
+
 
     Note-: Supported gradients
         This method supports differentiation with
@@ -408,7 +404,7 @@ class Rouchon4(_DEFixedStep, _DEAdaptiveStep):
     )
 
     normalize: bool = eqx.field(static=True, default=True)
-    exact_expm: bool = eqx.field(static=True, default=False)
+    time_independent: bool = eqx.field(static=True, default=False)
 
     # dummy init to have the signature in the documentation
     def __init__(
@@ -421,14 +417,14 @@ class Rouchon4(_DEFixedStep, _DEAdaptiveStep):
         max_steps: int = 100_000,
         dt: float | None = None,
         normalize: bool = True,
-        exact_expm: bool = False,
+        time_independent: bool = False,
     ):
         _DEFixedStep.__init__(self, dt)  # ty: ignore[invalid-argument-type]
         _DEAdaptiveStep.__init__(
             self, rtol, atol, safety_factor, min_factor, max_factor, max_steps
         )
         self.normalize = normalize
-        self.exact_expm = exact_expm
+        self.time_independent = time_independent
 
 
 class Rouchon5(_DEFixedStep, _DEAdaptiveStep):
@@ -453,9 +449,8 @@ class Rouchon5(_DEFixedStep, _DEAdaptiveStep):
         normalize: If True, the scheme is trace-preserving to machine precision, which
             is the recommended option because it is much more stable. Otherwise, it is
             only trace-preserving to the scheme order in the numerical step size.
-        exact_expm: If True, the scheme uses the exact matrix exponential internally (at
-            the cost of losing sparsity), otherwise it uses a Taylor expansion up to
-            the scheme order.
+        time_independent: If True, the scheme assumes time-independent operators.
+
 
     Note-: Supported gradients
         This method supports differentiation with
@@ -472,7 +467,7 @@ class Rouchon5(_DEFixedStep, _DEAdaptiveStep):
     )
 
     normalize: bool = eqx.field(static=True, default=True)
-    exact_expm: bool = eqx.field(static=True, default=False)
+    time_independent: bool = eqx.field(static=True, default=False)
 
     # dummy init to have the signature in the documentation
     def __init__(
@@ -485,14 +480,14 @@ class Rouchon5(_DEFixedStep, _DEAdaptiveStep):
         max_steps: int = 100_000,
         dt: float | None = None,
         normalize: bool = True,
-        exact_expm: bool = False,
+        time_independent: bool = False,
     ):
         _DEFixedStep.__init__(self, dt)  # ty: ignore[invalid-argument-type]
         _DEAdaptiveStep.__init__(
             self, rtol, atol, safety_factor, min_factor, max_factor, max_steps
         )
         self.normalize = normalize
-        self.exact_expm = exact_expm
+        self.time_independent = time_independent
 
 
 class Dopri5(_DEAdaptiveStep):
