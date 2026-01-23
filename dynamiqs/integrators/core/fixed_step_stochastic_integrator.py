@@ -488,7 +488,7 @@ class DSSESolveRouchon1Integrator(DSSEFixedStepIntegrator):
     def forward(self, t: Scalar, y: SDEState, dX: Array) -> SDEState:
         psi = y.state
         dW = dX
-        L, H = self.L(t), self.H(t)
+        L = self.L(t)
         Lpsi = [_L @ psi for _L in L]
 
         # === measurement Y
@@ -505,7 +505,7 @@ class DSSESolveRouchon1Integrator(DSSEFixedStepIntegrator):
 
         # === state psi
         krausmap = MESolveFixedRouchon1Integrator.build_kraus_map(
-            H, L, self.dt, self.method.exact_expm
+            self.H, self.L, self.dt, self.method.time_dependent
         )
         Ms_average = krausmap.get_kraus_operators()
         if self.method.normalize:
