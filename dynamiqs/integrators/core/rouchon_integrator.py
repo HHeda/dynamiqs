@@ -275,17 +275,23 @@ class MESolveFixedRouchonIntegrator(MESolveDiffraxIntegrator):
             return self.G(t) @ y
         no_jump_propagator_flow = ODETerm(_no_jump_propagator_flow)
         def _no_jump_propagator(t, dt):
-            sol = diffeqsolve(
+            solver = self.no_jump_solver
+            solver_state = solver.init(no_jump_propagator_flow, t, t + dt, self.identity, None)
+            y1, error, dense_info, solver_state, result = solver.step(
                 no_jump_propagator_flow,
-                solver=self.no_jump_solver,
                 t0=t,
-                t1=t + dt,       # one step only
+                t1=t + dt,
                 y0=self.identity,
-                dt0=dt,
-                saveat=SaveAt(dense=True),
-                stepsize_controller=ConstantStepSize()    # force non-adaptive step
+                args=None,
+                solver_state=solver_state,
+                made_jump=False,
             )
-            return sol.interpolation.evaluate
+            interpolant = solver.interpolation_cls(
+                t0=t,
+                t1=t + dt,
+                **dense_info,
+            )
+            return interpolant.evaluate
         return _no_jump_propagator
 
     def _build_kraus_map(self, t: float, dt: float) -> KrausMap:
@@ -442,33 +448,45 @@ class MESolveAdaptiveRouchonIntegrator(MESolveDiffraxIntegrator):
     
     @property
     def no_jump_propagators(self):
-        no_jump_propagator_flow = ODETerm(lambda t, y, args: self.G(t) @ y)
+        no_jump_propagator_term = ODETerm(lambda t, y, args: self.G(t) @ y)
 
         def _no_jump_propagator_low(t, dt):
-            sol = diffeqsolve(
-                no_jump_propagator_flow,
-                solver=self.no_jump_solver_low,
+            solver_low = self.no_jump_solver_low
+            state_low = solver_low.init(no_jump_propagator_term, t, t + dt, self.identity, None)
+            y1, error, dense_info, state_low, result = solver_low.step(
+                no_jump_propagator_term,
                 t0=t,
-                t1=t + dt,       # one step only
+                t1=t + dt,
                 y0=self.identity,
-                dt0=dt,
-                saveat=SaveAt(dense=True),
-                stepsize_controller=ConstantStepSize()    # force non-adaptive step
+                args=None,
+                solver_state=state_low,
+                made_jump=False,
             )
-            return sol.interpolation.evaluate
+            interpolant_low = solver_low.interpolation_cls(
+                t0=t,
+                t1=t + dt,
+                **dense_info,
+            )
+            return interpolant_low.evaluate
 
         def _no_jump_propagator_high(t, dt):
-            sol = diffeqsolve(
-                no_jump_propagator_flow,
-                solver=self.no_jump_solver_high,
+            solver_high = self.no_jump_solver_high
+            state_high = solver_high.init(no_jump_propagator_term, t, t + dt, self.identity, None)
+            y1, error, dense_info, state_high, result = solver_high.step(
+                no_jump_propagator_term,
                 t0=t,
-                t1=t + dt,       # one step only
+                t1=t + dt,
                 y0=self.identity,
-                dt0=dt,
-                saveat=SaveAt(dense=True),
-                stepsize_controller=ConstantStepSize()    # force non-adaptive step
+                args=None,
+                solver_state=state_high,
+                made_jump=False,
             )
-            return sol.interpolation.evaluate
+            interpolant_high = solver_high.interpolation_cls(
+                t0=t,
+                t1=t + dt,
+                **dense_info,
+            )
+            return interpolant_high.evaluate
         return _no_jump_propagator_low, _no_jump_propagator_high
 
     @property
