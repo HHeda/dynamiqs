@@ -10,6 +10,7 @@ import numpy as np
 from jax import Array
 from jaxtyping import ArrayLike, PRNGKeyArray, PyTree, Scalar
 
+from diffrax import ODETerm, Euler
 from ...qarrays.qarray import QArray
 from ...qarrays.utils import stack
 from ...result import DiffusiveSolveSaved, JumpSolveSaved, Result, Saved
@@ -484,8 +485,44 @@ class DSSESolveRouchon1Integrator(DSSEFixedStepIntegrator):
     """Integrator solving the diffusive SSE with the Rouchon1 method."""
 
     @property
-    def identity(self):
+    def identity(self) -> QArray:
         return eye_like(self.H(0))
+    
+    @property
+    def G(self):
+        def G_at_t(t):
+            LdL = sum([_L.dag() @ _L for _L in self.L(t)])
+            return -1j * self.H(t) - 0.5 * LdL
+        return G_at_t
+    
+    @property
+    def no_jump_solver(self):
+        return Euler()
+    
+    @property
+    def no_jump_propagator(self):
+        def _no_jump_propagator_flow(t, y, *args):
+            return self.G(t) @ y
+        no_jump_propagator_flow = ODETerm(_no_jump_propagator_flow)
+        def _no_jump_propagator(t, dt):
+            solver = self.no_jump_solver
+            solver_state = solver.init(no_jump_propagator_flow, t, t + dt, self.identity, None)
+            y1, error, dense_info, solver_state, result = solver.step(
+                no_jump_propagator_flow,
+                t0=t,
+                t1=t + dt,
+                y0=self.identity,
+                args=None,
+                solver_state=solver_state,
+                made_jump=False,
+            )
+            interpolant = solver.interpolation_cls(
+                t0=t,
+                t1=t + dt,
+                **dense_info,
+            )
+            return interpolant.evaluate
+        return _no_jump_propagator
 
     def forward(self, t: Scalar, y: SDEState, dX: Array) -> SDEState:
         psi = y.state
@@ -504,7 +541,7 @@ class DSSESolveRouchon1Integrator(DSSEFixedStepIntegrator):
 
         # === state psi
         kraus_map = MESolveFixedRouchon1Integrator.build_kraus_map(
-            self.H, self.L, t, self.dt, self.identity
+            self.no_jump_propagator(t, self.dt), self.L, t, self.dt, self.identity
         )
         Ms_average = kraus_map.get_kraus_operators()
         if self.method.normalize:
@@ -568,10 +605,49 @@ class DSMESolveEulerMayuramaIntegrator(DSMEFixedStepIntegrator):
 
 class DSMESolveRouchon1Integrator(DSMEFixedStepIntegrator, SolveInterface):
     """Integrator solving the diffusive SME with the Rouchon1 method."""
-
     @property
     def identity(self) -> QArray:
         return eye_like(self.H(0))
+    
+    @property
+    def G(self):
+        def G_at_t(t):
+            LdL = sum([_L.dag() @ _L for _L in self.L(t)])
+            return -1j * self.H(t) - 0.5 * LdL
+        return G_at_t
+    
+    @property
+    def no_jump_solver(self):
+        # we use the same solver as for the Rouchon1 jump integrator, but with a
+        # different no-jump propagator flow (see below)
+        return Euler()
+    
+    
+    @property
+    def no_jump_propagator(self):
+        def _no_jump_propagator_flow(t, y, *args):
+            return self.G(t) @ y
+        
+        no_jump_propagator_flow = ODETerm(_no_jump_propagator_flow)
+        def _no_jump_propagator(t, dt):
+            solver = self.no_jump_solver
+            solver_state = solver.init(no_jump_propagator_flow, t, t + dt, self.identity, None)
+            y1, error, dense_info, solver_state, result = solver.step(
+                no_jump_propagator_flow,
+                t0=t,
+                t1=t + dt,
+                y0=self.identity,
+                args=None,
+                solver_state=solver_state,
+                made_jump=False,
+            )
+            interpolant = solver.interpolation_cls(
+                t0=t,
+                t1=t + dt,
+                **dense_info,
+            )
+            return interpolant.evaluate
+        return _no_jump_propagator
 
     def forward(self, t: Scalar, y: SDEState, dX: Array) -> SDEState:
         # The Rouchon update for a single loss channel is:
@@ -595,7 +671,7 @@ class DSMESolveRouchon1Integrator(DSMEFixedStepIntegrator, SolveInterface):
 
         # === state rho
         kraus_map = MESolveFixedRouchon1Integrator.build_kraus_map(
-            self.H, self.L, t, self.dt, self.identity
+            self.no_jump_propagator(t, self.dt), self.L, t, self.dt, self.identity
         )
         Ms_average = kraus_map.get_kraus_operators()
         if self.method.normalize:
