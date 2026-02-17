@@ -483,6 +483,10 @@ def cholesky_normalize_ket(kraus_map: KrausMap, psi: QArray) -> jax.Array:
 class DSSESolveRouchon1Integrator(DSSEFixedStepIntegrator):
     """Integrator solving the diffusive SSE with the Rouchon1 method."""
 
+    @property
+    def identity(self):
+        return eye_like(self.H(0))
+
     def forward(self, t: Scalar, y: SDEState, dX: Array) -> SDEState:
         psi = y.state
         dW = dX
@@ -500,7 +504,7 @@ class DSSESolveRouchon1Integrator(DSSEFixedStepIntegrator):
 
         # === state psi
         kraus_map = MESolveFixedRouchon1Integrator.build_kraus_map(
-            self.H, self.L, t, self.dt, True
+            self.H, self.L, t, self.dt, self.identity
         )
         Ms_average = kraus_map.get_kraus_operators()
         if self.method.normalize:
@@ -565,6 +569,10 @@ class DSMESolveEulerMayuramaIntegrator(DSMEFixedStepIntegrator):
 class DSMESolveRouchon1Integrator(DSMEFixedStepIntegrator, SolveInterface):
     """Integrator solving the diffusive SME with the Rouchon1 method."""
 
+    @property
+    def identity(self) -> QArray:
+        return eye_like(self.H(0))
+
     def forward(self, t: Scalar, y: SDEState, dX: Array) -> SDEState:
         # The Rouchon update for a single loss channel is:
         #   rho_{k+1} = M_dY @ rho_k @ M_dY^\dag + M1 @ rho_k @ M1d / Tr[...]
@@ -587,7 +595,7 @@ class DSMESolveRouchon1Integrator(DSMEFixedStepIntegrator, SolveInterface):
 
         # === state rho
         kraus_map = MESolveFixedRouchon1Integrator.build_kraus_map(
-            self.H, self.L, t, self.dt, True
+            self.H, self.L, t, self.dt, self.identity
         )
         Ms_average = kraus_map.get_kraus_operators()
         if self.method.normalize:
