@@ -783,26 +783,65 @@ class MESolveAdaptiveRouchonIntegrator(MESolveDiffraxIntegrator):
 
 class MESolveAdaptiveRouchon2Integrator(MESolveAdaptiveRouchonIntegrator):
     """Integrator computing the time evolution of the Lindblad master equation using the
-    adaptive Rouchon 1-2 method.
+    adaptive Rouchon 1-2 method with embedded dense outputs from Midpoint.
     """
+
     @property
-    def no_jump_solver_low(self):
-        return Euler()
-    
-    @property
-    def no_jump_solver_high(self):
-        return Midpoint()
-    
+    def no_jump_propagators(self):
+        """Returns embedded order 1 (Euler) and order 2 (Midpoint) propagators
+        from a single Midpoint computation, using the embedded error estimate.
+        """
+        def _no_jump_propagator_flow(t, y, *args):
+            return self.G(t) @ y
+        no_jump_propagator_term = ODETerm(_no_jump_propagator_flow)
+        solver_low = Euler()
+        solver_high = Midpoint()
+
+        def _no_jump_propagators(t, dt):
+            y0 = self.identity
+
+            # Run Midpoint step to get the order 2 result and the embedded error
+            solver_state = solver_high.init(no_jump_propagator_term, t, t + dt, y0, None)
+            y1_high, error, dense_info_high, solver_state, result = solver_high.step(
+                no_jump_propagator_term,
+                t0=t,
+                t1=t + dt,
+                y0=y0,
+                args=None,
+                solver_state=solver_state,
+                made_jump=False,
+            )
+
+            # Midpoint error = y_high - y_low (order 2 minus embedded order 1)
+            # So y_low = y_high - error
+            y1_low = y1_high - error
+            dense_info_low = dict(y0=y0, y1=y1_low)
+
+            # Create interpolants using each solver's interpolation class
+            interpolant_low = solver_low.interpolation_cls(
+                t0=t,
+                t1=t + dt,
+                **dense_info_low,
+            )
+            interpolant_high = solver_high.interpolation_cls(
+                t0=t,
+                t1=t + dt,
+                **dense_info_high,
+            )
+
+            return interpolant_low.evaluate, interpolant_high.evaluate
+
+        return _no_jump_propagators
+
     @property
     def terms(self) -> dx.AbstractTerm:
         def rouchon_step(t0, t1, y0):  # noqa: ANN202
             rho = y0
             dt = t1 - t0
-            no_jump_propagator_low, no_jump_propagator_high = [no_jump_propagator(t0, dt)
-                                        for no_jump_propagator in self.no_jump_propagators]
+            no_jump_propagator_low, no_jump_propagator_high = self.no_jump_propagators(t0, dt)
             # === first order
             kraus_map_1 = MESolveFixedRouchon1Integrator.build_kraus_map(
-                no_jump_propagator_low, self.L, t0, dt, self.time_dependent
+                no_jump_propagator_low, self.L, t0, dt, self.identity
             )
             rho_1 = (
                 cholesky_normalize(kraus_map_1, rho) if self.method.normalize else rho
@@ -811,7 +850,7 @@ class MESolveAdaptiveRouchon2Integrator(MESolveAdaptiveRouchonIntegrator):
 
             # === second order
             kraus_map_2 = MESolveFixedRouchon2Integrator.build_kraus_map(
-                no_jump_propagator_high, self.L, t0, dt, self.time_dependent
+                no_jump_propagator_high, self.L, t0, dt, self.identity
             )
             rho_2 = (
                 cholesky_normalize(kraus_map_2, rho) if self.method.normalize else rho
@@ -825,15 +864,58 @@ class MESolveAdaptiveRouchon2Integrator(MESolveAdaptiveRouchonIntegrator):
 
 class MESolveAdaptiveRouchon3Integrator(MESolveAdaptiveRouchonIntegrator):
     """Integrator computing the time evolution of the Lindblad master equation using the
-    adaptive Rouchon 2-3 method.
+    adaptive Rouchon 2-3 method with embedded dense outputs from Bosh3.
     """
-    @property
-    def no_jump_solver_low(self):
-        return Midpoint()
 
     @property
-    def no_jump_solver_high(self):
-        return Bosh3()
+    def no_jump_propagators(self):
+        """Returns embedded order 2 and order 3 propagators from a single Bosh3 
+        computation, using the embedded error estimate.
+        """
+        def _no_jump_propagator_flow(t, y, *args):
+            return self.G(t) @ y
+        no_jump_propagator_term = ODETerm(_no_jump_propagator_flow)
+        solver_low = Midpoint()
+        solver_high = Bosh3()
+
+        def _no_jump_propagators(t, dt):
+            y0 = self.identity
+
+            # Run Bosh3 step to get the order 3 result and the embedded error
+            solver_state = solver_high.init(no_jump_propagator_term, t, t + dt, y0, None)
+            y1_high, error, dense_info_high, solver_state, result = solver_high.step(
+                no_jump_propagator_term,
+                t0=t,
+                t1=t + dt,
+                y0=y0,
+                args=None,
+                solver_state=solver_state,
+                made_jump=False,
+            )
+
+            # Bosh3 error = y_high - y_low (order 3 minus embedded order 2)
+            # So y_low = y_high - error
+            y1_low = y1_high - error
+
+            # dense_info_high contains k (the stages), extract k0 and k1 for Midpoint interpolation
+            k = dense_info_high['k']
+            dense_info_low = dict(y0=y0, y1=y1_low, k=k[:2])
+
+            # Create interpolants using each solver's interpolation class
+            interpolant_low = solver_low.interpolation_cls(
+                t0=t,
+                t1=t + dt,
+                **dense_info_low,
+            )
+            interpolant_high = solver_high.interpolation_cls(
+                t0=t,
+                t1=t + dt,
+                **dense_info_high,
+            )
+
+            return interpolant_low.evaluate, interpolant_high.evaluate
+
+        return _no_jump_propagators
 
     @property
     def terms(self) -> dx.AbstractTerm:
@@ -841,12 +923,11 @@ class MESolveAdaptiveRouchon3Integrator(MESolveAdaptiveRouchonIntegrator):
             rho = y0
             dt = t1 - t0
             
-            no_jump_propagator_low, no_jump_propagator_high = [no_jump_propagator(t0, dt)
-                                        for no_jump_propagator in self.no_jump_propagators]
+            no_jump_propagator_low, no_jump_propagator_high = self.no_jump_propagators(t0, dt)
             
             # === second order
             kraus_map_2 = MESolveFixedRouchon2Integrator.build_kraus_map(
-                no_jump_propagator_low, self.L, t0, dt, self.time_dependent
+                no_jump_propagator_low, self.L, t0, dt, self.identity
             )
             rho_2 = (
                 cholesky_normalize(kraus_map_2, rho) if self.method.normalize else rho
@@ -855,7 +936,7 @@ class MESolveAdaptiveRouchon3Integrator(MESolveAdaptiveRouchonIntegrator):
 
             # === third order
             kraus_map_3 = MESolveFixedRouchon3Integrator.build_kraus_map(
-                no_jump_propagator_high, self.L, t0, dt, self.time_dependent
+                no_jump_propagator_high, self.L, t0, dt, self.identity
             )
             rho_3 = (
                 cholesky_normalize(kraus_map_3, rho) if self.method.normalize else rho
