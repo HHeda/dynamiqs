@@ -161,13 +161,16 @@ class KrausMapRK(eqx.Module):
         r"""Compute all intermediate stages $\rho^{(0)}, \ldots, \rho^{(s-1)}$."""
         stages: list[QArray] = []
         for i, ci in enumerate(self._c):
-            rho_i = M_rho_Mdag(self.U(ci), rho0)
+            if ci == 0.0: # avoid unnecessary propagator application for the first stage
+                rho_i = rho0
+            else:
+                rho_i = M_rho_Mdag(self.U(ci), rho0)
             for j in range(i):
                 a_ij = self._A[i][j]
                 if a_ij == 0.0:
                     continue
                 cj = self._c[j]
-                if cj == ci:
+                if cj == ci: # avoid unnecessary identity propagator application
                     rho_i = rho_i + self.dt * a_ij * self.dissipator(cj, stages[j])
                 else:
                     P_ij = self.propagator_ratio(ci, cj)
