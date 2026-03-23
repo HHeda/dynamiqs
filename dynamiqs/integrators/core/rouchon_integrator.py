@@ -3,14 +3,20 @@ from __future__ import annotations
 from abc import abstractmethod
 from collections.abc import Callable, Sequence
 from dataclasses import replace
+from typing import ClassVar
 
 import diffrax as dx
 import equinox as eqx
 import jax
 import jax.numpy as jnp
-from diffrax import AbstractRungeKutta, Bosh3, Dopri5, Euler, Midpoint, ODETerm
+import numpy as np
+from diffrax import AbstractRungeKutta, Bosh3, Euler, Midpoint, ODETerm
 from diffrax._custom_types import VF, Args, Control, RealScalarLike, Y
-from diffrax._local_interpolation import LocalLinearInterpolation
+from diffrax._local_interpolation import (
+    LocalLinearInterpolation,
+    ThirdOrderHermitePolynomialInterpolation,
+)
+from diffrax._solver.runge_kutta import AbstractERK, ButcherTableau
 
 from ...gradient import Forward
 from ...qarrays.layout import dense
@@ -19,6 +25,36 @@ from ...qarrays.utils import asqarray
 from ...result import MESolveResult
 from ...utils.operators import eye
 from .diffrax_integrator import MESolveDiffraxIntegrator
+
+
+# === Custom ClassicRK4 diffrax solver =======================================
+# diffrax does not include a plain 4th-order RK solver, so we define one using
+# its AbstractERK + ButcherTableau infrastructure.  The embedded 3rd-order error
+# estimate uses b_hat = [2/9, 1/3, 4/9, 0] (the Bosh3 weights evaluated on the
+# same stages), giving a proper RK4(3) pair for adaptive stepping.
+
+_classic_rk4_tableau = ButcherTableau(
+    a_lower=(
+        np.array([1 / 2]),
+        np.array([0.0, 1 / 2]),
+        np.array([0.0, 0.0, 1.0]),
+    ),
+    b_sol=np.array([1 / 6, 1 / 3, 1 / 3, 1 / 6]),
+    b_error=np.array([1 / 6 - 2 / 9, 1 / 3 - 1 / 3, 1 / 3 - 4 / 9, 1 / 6 - 0]),
+    c=np.array([1 / 2, 1 / 2, 1.0]),
+)
+
+
+class ClassicRK4(AbstractERK):
+    """Classic 4th-order Runge-Kutta with embedded 3rd-order error estimate."""
+
+    tableau: ClassVar[ButcherTableau] = _classic_rk4_tableau
+    interpolation_cls: ClassVar[
+        Callable[..., ThirdOrderHermitePolynomialInterpolation]
+    ] = ThirdOrderHermitePolynomialInterpolation.from_k
+
+    def order(self, terms):  # noqa: ANN001, ANN201
+        return 4
 
 
 class AbstractRouchonTerm(dx.AbstractTerm):
@@ -482,7 +518,7 @@ class MESolveFixedRouchon4Integrator(MESolveFixedRouchonIntegrator):
 
     @property
     def nojump_diffrax_solver(self) -> dx.AbstractSolver:
-        return Dopri5()
+        return ClassicRK4()
 
 
 class MESolveAdaptiveRouchonIntegrator(
@@ -641,17 +677,17 @@ class MESolveAdaptiveRouchon3Integrator(MESolveAdaptiveRouchonIntegrator):
 
 
 class MESolveAdaptiveRouchon4Integrator(MESolveAdaptiveRouchonIntegrator):
-    """Adaptive Rouchon 3-4 integrator with embedded dense outputs from Dopri5."""
+    """Adaptive Rouchon 3-4 integrator with embedded dense outputs from ClassicRK4."""
 
     _solver_low = Bosh3()
-    _solver_high = Dopri5()
+    _solver_high = ClassicRK4()
     _fixed_cls_low = MESolveFixedRouchon3Integrator
     _fixed_cls_high = MESolveFixedRouchon4Integrator
 
     def _build_dense_info_low(
         self, y0: QArray, y1_low: QArray, dense_info_high: dict
     ) -> dict:
-        # Bosh3 interpolation needs k stages; reuse first 4 from Dopri5
+        # Bosh3 interpolation needs k stages; reuse first 4 from ClassicRK4
         k = dense_info_high['k']
         return dict(y0=y0, y1=y1_low, k=k[:4])
 
