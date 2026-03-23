@@ -167,10 +167,13 @@ class KrausMapRK(eqx.Module):
                 if a_ij == 0.0:
                     continue
                 cj = self._c[j]
-                P_ij = self.propagator_ratio(ci, cj)
-                rho_i = rho_i + self.dt * a_ij * M_rho_Mdag(
-                    P_ij, self.dissipator(cj, stages[j])
-                )
+                if cj == ci:
+                    rho_i = rho_i + self.dt * a_ij * self.dissipator(cj, stages[j])
+                else:
+                    P_ij = self.propagator_ratio(ci, cj)
+                    rho_i = rho_i + self.dt * a_ij * M_rho_Mdag(
+                        P_ij, self.dissipator(cj, stages[j])
+                    )
             stages.append(rho_i)
         return stages
 
@@ -181,10 +184,13 @@ class KrausMapRK(eqx.Module):
             if bi == 0.0:
                 continue
             ci = self._c[i]
-            Q_i = self.propagator_ratio(1.0, ci)
-            rho_new = rho_new + self.dt * bi * M_rho_Mdag(
-                Q_i, self.dissipator(ci, stages[i])
-            )
+            if ci == 1.0:
+                rho_new = rho_new + self.dt * bi * self.dissipator(ci, stages[i])
+            else:
+                Q_i = self.propagator_ratio(1.0, ci)
+                rho_new = rho_new + self.dt * bi * M_rho_Mdag(
+                    Q_i, self.dissipator(ci, stages[i])
+                )
         return rho_new
 
     # -- adjoint pass (for normalization) ------------------------------------
