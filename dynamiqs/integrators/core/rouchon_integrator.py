@@ -8,7 +8,7 @@ import diffrax as dx
 import equinox as eqx
 import jax
 import jax.numpy as jnp
-from diffrax import AbstractRungeKutta, Bosh3, Euler, Midpoint, ODETerm
+from diffrax import AbstractRungeKutta, Bosh3, Dopri5, Euler, Midpoint, ODETerm
 from diffrax._custom_types import VF, Args, Control, RealScalarLike, Y
 from diffrax._local_interpolation import LocalLinearInterpolation
 
@@ -302,6 +302,29 @@ class KrausHeun3(KrausMapRK):
     _b = (0.25, 0.0, 0.75)
 
 
+class KrausRK4(KrausMapRK):
+    r"""Fourth-order Rouchon method based on the classic RK4 method.
+
+    Butcher tableau::
+
+        0     |
+        1/2   | 1/2
+        1/2   | 0     1/2
+        1     | 0     0     1
+        ---------------------------
+              | 1/6   1/3   1/3   1/6
+    """
+
+    _c = (0.0, 0.5, 0.5, 1.0)
+    _A = (
+        (0.0, 0.0, 0.0, 0.0),
+        (0.5, 0.0, 0.0, 0.0),
+        (0.0, 0.5, 0.0, 0.0),
+        (0.0, 0.0, 1.0, 0.0),
+    )
+    _b = (1 / 6, 1 / 3, 1 / 3, 1 / 6)
+
+
 class RouchonPropertiesMixin:
     """Mixin providing shared properties for Rouchon integrators.
 
@@ -450,6 +473,16 @@ class MESolveFixedRouchon3Integrator(MESolveFixedRouchonIntegrator):
     @property
     def nojump_diffrax_solver(self) -> dx.AbstractSolver:
         return Bosh3()
+
+
+class MESolveFixedRouchon4Integrator(MESolveFixedRouchonIntegrator):
+    """Fixed step Rouchon 4 (RK4) integrator for the Lindblad master equation."""
+
+    _kraus_map_cls = KrausRK4
+
+    @property
+    def nojump_diffrax_solver(self) -> dx.AbstractSolver:
+        return Dopri5()
 
 
 class MESolveAdaptiveRouchonIntegrator(
@@ -607,6 +640,22 @@ class MESolveAdaptiveRouchon3Integrator(MESolveAdaptiveRouchonIntegrator):
         return dict(y0=y0, y1=y1_low, k=k[:2])
 
 
+class MESolveAdaptiveRouchon4Integrator(MESolveAdaptiveRouchonIntegrator):
+    """Adaptive Rouchon 3-4 integrator with embedded dense outputs from Dopri5."""
+
+    _solver_low = Bosh3()
+    _solver_high = Dopri5()
+    _fixed_cls_low = MESolveFixedRouchon3Integrator
+    _fixed_cls_high = MESolveFixedRouchon4Integrator
+
+    def _build_dense_info_low(
+        self, y0: QArray, y1_low: QArray, dense_info_high: dict
+    ) -> dict:
+        # Bosh3 interpolation needs k stages; reuse first 4 from Dopri5
+        k = dense_info_high['k']
+        return dict(y0=y0, y1=y1_low, k=k[:4])
+
+
 mesolve_rouchon1_integrator_constructor = lambda **kwargs: (
     MESolveFixedRouchon1Integrator(
         **kwargs,
@@ -646,6 +695,23 @@ def mesolve_rouchon3_integrator_constructor(**kwargs) -> MESolveDiffraxIntegrato
     return MESolveAdaptiveRouchon3Integrator(
         **kwargs,
         diffrax_solver=AdaptiveRouchonDXSolver(3),
+        fixed_step=False,
+        result_class=MESolveResult,
+    )
+
+
+def mesolve_rouchon4_integrator_constructor(**kwargs) -> MESolveDiffraxIntegrator:
+    """Factory function to create a Rouchon4 integrator."""
+    if kwargs['method'].dt is not None:
+        return MESolveFixedRouchon4Integrator(
+            **kwargs,
+            diffrax_solver=RouchonDXSolver(4),
+            fixed_step=True,
+            result_class=MESolveResult,
+        )
+    return MESolveAdaptiveRouchon4Integrator(
+        **kwargs,
+        diffrax_solver=AdaptiveRouchonDXSolver(4),
         fixed_step=False,
         result_class=MESolveResult,
     )
