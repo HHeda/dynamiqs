@@ -17,6 +17,8 @@ from diffrax._local_interpolation import (
     ThirdOrderHermitePolynomialInterpolation,
 )
 from diffrax._solver.runge_kutta import AbstractERK, ButcherTableau
+from equinox.internal import ω  # noqa: PLC2403
+from jaxtyping import Array, ArrayLike, PyTree, Shaped
 
 from ...gradient import Forward
 from ...qarrays.layout import dense
@@ -25,8 +27,6 @@ from ...qarrays.utils import asqarray
 from ...result import MESolveResult
 from ...utils.operators import eye
 from .diffrax_integrator import MESolveDiffraxIntegrator
-from equinox.internal import ω
-
 
 # === Custom ClassicRK4 diffrax solver =======================================
 # diffrax does not include a plain 4th-order RK solver, so we define one using
@@ -39,11 +39,13 @@ _Zonneveld4_tableau = ButcherTableau(
         np.array([1 / 2]),
         np.array([0.0, 1 / 2]),
         np.array([0.0, 0.0, 1.0]),
-        np.array([5/32, 7/32, 13/32, -1/32]) 
+        np.array([5 / 32, 7 / 32, 13 / 32, -1 / 32]),
     ),
     b_sol=np.array([1 / 6, 1 / 3, 1 / 3, 1 / 6, 0.0]),
-    b_error=np.array([1 / 6 + 1/ 2 , 1 / 3 - 7 / 3, 1 / 3 - 7 / 3, 1 / 6 - 13/6, 0.0 + 16/3]), 
-    c=np.array([1 / 2, 1 / 2, 1.0, 3/4]),
+    b_error=np.array(
+        [1 / 6 + 1 / 2, 1 / 3 - 7 / 3, 1 / 3 - 7 / 3, 1 / 6 - 13 / 6, 0.0 + 16 / 3]
+    ),
+    c=np.array([1 / 2, 1 / 2, 1.0, 3 / 4]),
 )
 
 
@@ -54,17 +56,21 @@ _Zonneveld4_tableau = ButcherTableau(
 #         np.array([0.0, 0.0, 1.0]),
 #     ),
 #     b_sol=np.array([1 / 6, 1 / 3, 1 / 3, 1 / 6]),
-#     b_error=np.array([0.0, 0.0, 0.0, 0.0]), 
+#     b_error=np.array([0.0, 0.0, 0.0, 0.0]),
 #     c=np.array([1 / 2, 1 / 2, 1.0]),
 # )
 
 # _Ralston4_tableau = ButcherTableau(
 #     a_lower=(
 #         np.array([0.4]),
-#         np.array([(-2889 + 1428*np.sqrt(5))/1024, (3785 - 1620*np.sqrt(5))/1024]),
-#         np.array([(-3365 + 2094*np.sqrt(5))/6040, (-975 - 3046*np.sqrt(5))/2552, (467_040 + 203_968*np.sqrt(5))/240_845]),
+#         np.array([(-2889 + 1428*np.sqrt(5))/1024,
+# (3785 - 1620*np.sqrt(5))/1024]),
+#         np.array([(-3365 + 2094*np.sqrt(5))/6040,
+# (-975 - 3046*np.sqrt(5))/2552, (467_040 + 203_968*np.sqrt(5))/240_845]),
 #     ),
-#     b_sol=np.array([(263 + 24*np.sqrt(5))/1812, (125-1000*np.sqrt(5))/3828, (3_426_304 + 1_661_952*np.sqrt(5))/5924787, (30-4*np.sqrt(5))/123]),
+#     b_sol=np.array([(263 + 24*np.sqrt(5))/1812,
+# (125-1000*np.sqrt(5))/3828, (3_426_304 + 1_661_952*np.sqrt(5))/5924787,
+#  (30-4*np.sqrt(5))/123]),
 #     b_error=np.array([0.0, 0.0, 0.0, 0.0]),
 #     c=np.array([0.4, (14-3*np.sqrt(5))/16, 1.0]),
 # )
@@ -74,26 +80,31 @@ _Zonneveld4_tableau = ButcherTableau(
 #         np.array([1 / 3]),
 #         np.array([1/6, 1 / 6]),
 #         np.array([1/8, 0.0, 3/8]),
-#         np.array([1/2, 0.0, -3/2, 2.0]) 
+#         np.array([1/2, 0.0, -3/2, 2.0])
 #     ),
 #     b_sol=np.array([1 / 6, 0.0 , 0.0, 2/3, 1/6]),
-#     b_error=np.array([1 / 6, 0.0 , 0.0, 2/3, 1/6])-np.array([1/10, 0, 3/10, 2/5, 1/5]),
+#     b_error=(np.array([1 / 6, 0.0 , 0.0, 2/3, 1/6])
+# -np.array([1/10, 0, 3/10, 2/5, 1/5])),
 #     c=np.array([1 / 3, 1 / 3, 1/2, 1.]),
 # )
 
-class CustomThirdOrderHermitePolynomialInterpolation(ThirdOrderHermitePolynomialInterpolation):
+
+class CustomThirdOrderHermitePolynomialInterpolation(
+    ThirdOrderHermitePolynomialInterpolation
+):
     @classmethod
     def from_k(
         cls,
         *,
         t0: RealScalarLike,
         t1: RealScalarLike,
-        y0: PyTree[Shaped[ArrayLike, " ?*dims"], "Y"],
-        y1: PyTree[Shaped[ArrayLike, " ?*dims"], "Y"],
-        k: PyTree[Shaped[Array, "order ?*dims"], "Y"],
-    ):
+        y0: PyTree[Shaped[ArrayLike, ' ?*dims'], Y],  # noqa: F722
+        y1: PyTree[Shaped[ArrayLike, ' ?*dims'], Y],  # noqa: F722
+        k: PyTree[Shaped[Array, 'order ?*dims'], Y],  # noqa: F722
+    ) -> ThirdOrderHermitePolynomialInterpolation:
         return cls(t0=t0, t1=t1, y0=y0, y1=y1, k0=ω(k)[0].ω, k1=ω(k)[-2].ω)
-    
+
+
 class Zonnenveld4(AbstractERK):
     """Classic 4th-order Runge-Kutta with embedded 3rd-order error estimate."""
 
@@ -102,9 +113,10 @@ class Zonnenveld4(AbstractERK):
         Callable[..., ThirdOrderHermitePolynomialInterpolation]
     ] = CustomThirdOrderHermitePolynomialInterpolation.from_k
 
-    def order(self, terms):  # noqa: ANN001, ANN201
+    def order(self, _terms):  # noqa: ANN001, ANN201
         return 4
-    
+
+
 # class Ralston4(AbstractERK):
 #     """Classic 4th-order Runge-Kutta method without error estimate."""
 
@@ -113,9 +125,9 @@ class Zonnenveld4(AbstractERK):
 #         Callable[..., ThirdOrderHermitePolynomialInterpolation]
 #     ] = ThirdOrderHermitePolynomialInterpolation.from_k
 
-#     def order(self, terms):  # noqa: ANN001, ANN201
+#     def order(self, terms):
 #         return 4
-    
+
 # class Merson4(AbstractERK):
 #     """Merson's 4th-order method with embedded 3rd-order error estimate."""
 
@@ -124,9 +136,9 @@ class Zonnenveld4(AbstractERK):
 #         Callable[..., ThirdOrderHermitePolynomialInterpolation]
 #     ] = ThirdOrderHermitePolynomialInterpolation.from_k
 
-#     def order(self, terms):  # noqa: ANN001, ANN201
+#     def order(self, terms):
 #         return 4
-    
+
 # class ClassicRK4(AbstractERK):
 #     """Classic 4th-order Runge-Kutta method without error estimate."""
 
@@ -135,7 +147,7 @@ class Zonnenveld4(AbstractERK):
 #         Callable[..., ThirdOrderHermitePolynomialInterpolation]
 #     ] = ThirdOrderHermitePolynomialInterpolation.from_k
 
-#     def order(self, terms):  # noqa: ANN001, ANN201
+#     def order(self, terms):
 #         return 4
 
 
