@@ -79,7 +79,7 @@ _Zonneveld4_tableau = ButcherTableau(
 #     b_sol=np.array([1 / 6, 0.0 , 0.0, 2/3, 1/6]),
 #     b_error=np.array([1 / 6, 0.0 , 0.0, 2/3, 1/6])-np.array([1/10, 0, 3/10, 2/5, 1/5]),
 #     c=np.array([1 / 3, 1 / 3, 1/2, 1.]),
-)
+# )
 
 class CustomThirdOrderHermitePolynomialInterpolation(ThirdOrderHermitePolynomialInterpolation):
     @classmethod
