@@ -3,14 +3,22 @@ from __future__ import annotations
 from abc import abstractmethod
 from collections.abc import Callable, Sequence
 from dataclasses import replace
+from typing import ClassVar
 
 import diffrax as dx
 import equinox as eqx
 import jax
 import jax.numpy as jnp
+import numpy as np
 from diffrax import AbstractRungeKutta, Bosh3, Euler, Midpoint, ODETerm
 from diffrax._custom_types import VF, Args, Control, RealScalarLike, Y
-from diffrax._local_interpolation import LocalLinearInterpolation
+from diffrax._local_interpolation import (
+    LocalLinearInterpolation,
+    ThirdOrderHermitePolynomialInterpolation,
+)
+from diffrax._solver.runge_kutta import AbstractERK, ButcherTableau
+from equinox.internal import ω  # noqa: PLC2403
+from jaxtyping import Array, ArrayLike, PyTree, Shaped
 
 from ...gradient import Forward
 from ...qarrays.layout import dense
@@ -19,6 +27,128 @@ from ...qarrays.utils import asqarray
 from ...result import MESolveResult
 from ...utils.operators import eye
 from .diffrax_integrator import MESolveDiffraxIntegrator
+
+# === Custom ClassicRK4 diffrax solver =======================================
+# diffrax does not include a plain 4th-order RK solver, so we define one using
+# its AbstractERK + ButcherTableau infrastructure.  The embedded 3rd-order error
+# estimate uses b_hat = [2/9, 1/3, 4/9, 0] (the Bosh3 weights evaluated on the
+# same stages), giving a proper RK4(3) pair for adaptive stepping.
+
+_Zonneveld4_tableau = ButcherTableau(
+    a_lower=(
+        np.array([1 / 2]),
+        np.array([0.0, 1 / 2]),
+        np.array([0.0, 0.0, 1.0]),
+        np.array([5 / 32, 7 / 32, 13 / 32, -1 / 32]),
+    ),
+    b_sol=np.array([1 / 6, 1 / 3, 1 / 3, 1 / 6, 0.0]),
+    b_error=np.array(
+        [1 / 6 + 1 / 2, 1 / 3 - 7 / 3, 1 / 3 - 7 / 3, 1 / 6 - 13 / 6, 0.0 + 16 / 3]
+    ),
+    c=np.array([1 / 2, 1 / 2, 1.0, 3 / 4]),
+)
+
+
+# _Classic_RK4_tableau = ButcherTableau(
+#     a_lower=(
+#         np.array([1 / 2]),
+#         np.array([0.0, 1 / 2]),
+#         np.array([0.0, 0.0, 1.0]),
+#     ),
+#     b_sol=np.array([1 / 6, 1 / 3, 1 / 3, 1 / 6]),
+#     b_error=np.array([0.0, 0.0, 0.0, 0.0]),
+#     c=np.array([1 / 2, 1 / 2, 1.0]),
+# )
+
+# _Ralston4_tableau = ButcherTableau(
+#     a_lower=(
+#         np.array([0.4]),
+#         np.array([(-2889 + 1428*np.sqrt(5))/1024,
+# (3785 - 1620*np.sqrt(5))/1024]),
+#         np.array([(-3365 + 2094*np.sqrt(5))/6040,
+# (-975 - 3046*np.sqrt(5))/2552, (467_040 + 203_968*np.sqrt(5))/240_845]),
+#     ),
+#     b_sol=np.array([(263 + 24*np.sqrt(5))/1812,
+# (125-1000*np.sqrt(5))/3828, (3_426_304 + 1_661_952*np.sqrt(5))/5924787,
+#  (30-4*np.sqrt(5))/123]),
+#     b_error=np.array([0.0, 0.0, 0.0, 0.0]),
+#     c=np.array([0.4, (14-3*np.sqrt(5))/16, 1.0]),
+# )
+
+# _Merson4_tableau = ButcherTableau(
+#     a_lower=(
+#         np.array([1 / 3]),
+#         np.array([1/6, 1 / 6]),
+#         np.array([1/8, 0.0, 3/8]),
+#         np.array([1/2, 0.0, -3/2, 2.0])
+#     ),
+#     b_sol=np.array([1 / 6, 0.0 , 0.0, 2/3, 1/6]),
+#     b_error=(np.array([1 / 6, 0.0 , 0.0, 2/3, 1/6])
+# -np.array([1/10, 0, 3/10, 2/5, 1/5])),
+#     c=np.array([1 / 3, 1 / 3, 1/2, 1.]),
+# )
+
+
+class CustomThirdOrderHermitePolynomialInterpolation(
+    ThirdOrderHermitePolynomialInterpolation
+):
+    @classmethod
+    def from_k(
+        cls,
+        *,
+        t0: RealScalarLike,
+        t1: RealScalarLike,
+        y0: PyTree[Shaped[ArrayLike, ' ?*dims'], Y],  # noqa: F722
+        y1: PyTree[Shaped[ArrayLike, ' ?*dims'], Y],  # noqa: F722
+        k: PyTree[Shaped[Array, 'order ?*dims'], Y],  # noqa: F722
+    ) -> ThirdOrderHermitePolynomialInterpolation:
+        return cls(t0=t0, t1=t1, y0=y0, y1=y1, k0=ω(k)[0].ω, k1=ω(k)[-2].ω)
+
+
+class Zonnenveld4(AbstractERK):
+    """Classic 4th-order Runge-Kutta with embedded 3rd-order error estimate."""
+
+    tableau: ClassVar[ButcherTableau] = _Zonneveld4_tableau
+    interpolation_cls: ClassVar[
+        Callable[..., ThirdOrderHermitePolynomialInterpolation]
+    ] = CustomThirdOrderHermitePolynomialInterpolation.from_k
+
+    def order(self, _terms):  # noqa: ANN001, ANN201
+        return 4
+
+
+# class Ralston4(AbstractERK):
+#     """Classic 4th-order Runge-Kutta method without error estimate."""
+
+#     tableau: ClassVar[ButcherTableau] = _Ralston4_tableau
+#     interpolation_cls: ClassVar[
+#         Callable[..., ThirdOrderHermitePolynomialInterpolation]
+#     ] = ThirdOrderHermitePolynomialInterpolation.from_k
+
+#     def order(self, terms):
+#         return 4
+
+# class Merson4(AbstractERK):
+#     """Merson's 4th-order method with embedded 3rd-order error estimate."""
+
+#     tableau: ClassVar[ButcherTableau] = _Merson4_tableau
+#     interpolation_cls: ClassVar[
+#         Callable[..., ThirdOrderHermitePolynomialInterpolation]
+#     ] = ThirdOrderHermitePolynomialInterpolation.from_k
+
+#     def order(self, terms):
+#         return 4
+
+# class ClassicRK4(AbstractERK):
+#     """Classic 4th-order Runge-Kutta method without error estimate."""
+
+#     tableau: ClassVar[ButcherTableau] = _Classic_RK4_tableau
+#     interpolation_cls: ClassVar[
+#         Callable[..., ThirdOrderHermitePolynomialInterpolation]
+#     ] = ThirdOrderHermitePolynomialInterpolation.from_k
+
+#     def order(self, terms):
+#         return 4
 
 
 class AbstractRouchonTerm(dx.AbstractTerm):
@@ -302,6 +432,29 @@ class KrausHeun3(KrausMapRK):
     _b = (0.25, 0.0, 0.75)
 
 
+class KrausRK4(KrausMapRK):
+    r"""Fourth-order Rouchon method based on the classic RK4 method.
+
+    Butcher tableau::
+
+        0     |
+        1/2   | 1/2
+        1/2   | 0     1/2
+        1     | 0     0     1
+        ---------------------------
+              | 1/6   1/3   1/3   1/6
+    """
+
+    _c = (0.0, 0.5, 0.5, 1.0)
+    _A = (
+        (0.0, 0.0, 0.0, 0.0),
+        (0.5, 0.0, 0.0, 0.0),
+        (0.0, 0.5, 0.0, 0.0),
+        (0.0, 0.0, 1.0, 0.0),
+    )
+    _b = (1 / 6, 1 / 3, 1 / 3, 1 / 6)
+
+
 class RouchonPropertiesMixin:
     """Mixin providing shared properties for Rouchon integrators.
 
@@ -450,6 +603,16 @@ class MESolveFixedRouchon3Integrator(MESolveFixedRouchonIntegrator):
     @property
     def nojump_diffrax_solver(self) -> dx.AbstractSolver:
         return Bosh3()
+
+
+class MESolveFixedRouchon4Integrator(MESolveFixedRouchonIntegrator):
+    """Fixed step Rouchon 4 (RK4) integrator for the Lindblad master equation."""
+
+    _kraus_map_cls = KrausRK4
+
+    @property
+    def nojump_diffrax_solver(self) -> dx.AbstractSolver:
+        return Zonnenveld4()
 
 
 class MESolveAdaptiveRouchonIntegrator(
@@ -607,6 +770,22 @@ class MESolveAdaptiveRouchon3Integrator(MESolveAdaptiveRouchonIntegrator):
         return dict(y0=y0, y1=y1_low, k=k[:2])
 
 
+class MESolveAdaptiveRouchon4Integrator(MESolveAdaptiveRouchonIntegrator):
+    """Adaptive Rouchon 3-4 integrator with embedded dense outputs from ClassicRK4."""
+
+    _solver_low = Bosh3()
+    _solver_high = Zonnenveld4()
+    _fixed_cls_low = MESolveFixedRouchon3Integrator
+    _fixed_cls_high = MESolveFixedRouchon4Integrator
+
+    def _build_dense_info_low(
+        self, y0: QArray, y1_low: QArray, dense_info_high: dict
+    ) -> dict:
+        # Bosh3 interpolation needs k stages; reuse first 4 from ClassicRK4
+        k = dense_info_high['k']
+        return dict(y0=y0, y1=y1_low, k=k[:4])
+
+
 mesolve_rouchon1_integrator_constructor = lambda **kwargs: (
     MESolveFixedRouchon1Integrator(
         **kwargs,
@@ -646,6 +825,23 @@ def mesolve_rouchon3_integrator_constructor(**kwargs) -> MESolveDiffraxIntegrato
     return MESolveAdaptiveRouchon3Integrator(
         **kwargs,
         diffrax_solver=AdaptiveRouchonDXSolver(3),
+        fixed_step=False,
+        result_class=MESolveResult,
+    )
+
+
+def mesolve_rouchon4_integrator_constructor(**kwargs) -> MESolveDiffraxIntegrator:
+    """Factory function to create a Rouchon4 integrator."""
+    if kwargs['method'].dt is not None:
+        return MESolveFixedRouchon4Integrator(
+            **kwargs,
+            diffrax_solver=RouchonDXSolver(4),
+            fixed_step=True,
+            result_class=MESolveResult,
+        )
+    return MESolveAdaptiveRouchon4Integrator(
+        **kwargs,
+        diffrax_solver=AdaptiveRouchonDXSolver(4),
         fixed_step=False,
         result_class=MESolveResult,
     )
