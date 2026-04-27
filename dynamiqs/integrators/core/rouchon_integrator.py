@@ -14,9 +14,14 @@ import numpy as np
 from diffrax._custom_types import RealScalarLike, Y
 from diffrax._local_interpolation import LocalLinearInterpolation
 
-from ...qarrays.qarray import QArray
+from ...qarrays.qarray import QArray 
 from ...utils.operators import asqarray, eye_like
 from .diffrax_integrator import MESolveDiffraxIntegrator
+
+from ...qarrays.layout import dia
+
+_eps = 1e-30  # small constant to keep sqrt/pow smooth at zero
+
 
 
 class AbstractRouchonTerm(dx.AbstractTerm):
@@ -94,7 +99,39 @@ def cholesky_normalize(
         T, rho, lower=True, transpose_a=True, conjugate_a=True
     )
     # solve x @ T = rho => x = rho @ T^{-1}
-    return jax.lax.linalg.triangular_solve(T, rho, lower=True, left_side=True)
+    return jax.lax.linalg.triangular_solve(T, rho, lower=True, left_side=False)
+
+def approx_renormalize(rho: QArray, H_op: QArray, Ls_tq: Sequence[QArray], dt: float, order: int) -> QArray:
+    n = rho.shape[-1]
+    norm_sq = jnp.zeros(n)
+    dims = rho.dims
+
+    # ---- H contribution: ||H[:, j]||² ----
+    if H_op.layout == dia:
+        norm_sq = norm_sq + jnp.sum(
+            H_op.diags.real ** 2 + H_op.diags.imag ** 2, axis=-2
+        )
+    else:
+        H_arr = H_op.to_jax()
+        norm_sq = norm_sq + jnp.sum(
+            H_arr.real ** 2 + H_arr.imag ** 2, axis=0
+        )
+
+    # ---- Lindblad contributions: (0.5 diag(L†L)[j])² ----
+    for L_op in Ls_tq:
+        if L_op.layout == dia:
+            d = jnp.sum(L_op.diags.real ** 2 + L_op.diags.imag ** 2, axis=-2)
+        else:
+            L_arr = L_op.to_jax()
+            d = jnp.sum(L_arr.real ** 2 + L_arr.imag ** 2, axis=0)
+        norm_sq = norm_sq + 0.25 * d ** 2
+
+    preconditionner = jnp.sqrt(norm_sq + _eps)  # (n,)
+
+    pd = preconditionner[:, None] * dt
+    scale = 1 + (pd.real ** 2 + pd.imag ** 2 + _eps) ** ((order + 1) / 2)
+    return asqarray(rho.to_jax() / scale[:, None] / scale[None, :], dims=dims)
+
 
 
 def _expm_taylor(A: QArray, order: int) -> QArray:
@@ -404,7 +441,7 @@ class MESolveFixedRouchonIntegrator(MESolveDiffraxIntegrator):
         t: RealScalarLike,
         dt: RealScalarLike,
         time_independent: bool,
-    ) -> Sequence[QArray]:
+    ) -> Sequence[Sequence[Sequence[QArray]]]:
         pass
 
 
