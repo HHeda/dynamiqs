@@ -206,9 +206,11 @@ class Rouchon1(_DEFixedStep):
 
     Args:
         dt: Fixed time step.
-        normalize: If True, the scheme is trace-preserving to machine precision, which
-            is the recommended option because it is much more stable. Otherwise, it is
-            only trace-preserving to the scheme order in $\dt$.
+        normalize: If "cholesky", the scheme is trace-preserving to machine precision,
+            which is the recommended option because it is much more stable. If
+            "approx", a cheaper approximate renormalization is used. Otherwise,
+            normalization is disabled and the scheme is only trace-preserving to the
+            scheme order in $\dt$.
         time_independent: If True, the scheme assumes time-independent operators.
 
 
@@ -228,12 +230,12 @@ class Rouchon1(_DEFixedStep):
 
     # todo: fix static dt (similar issue as static tsave in dssesolve)
     dt: float = eqx.field(static=True)
-    normalize: bool = eqx.field(static=True, default=True)
+    normalize: str = eqx.field(static=True, default="cholesky")
     time_independent: bool = eqx.field(static=True, default=False)
 
     # dummy init to have the signature in the documentation
     def __init__(
-        self, dt: float, normalize: bool = True, time_independent: bool = False
+        self, dt: float, normalize: str = "cholesky", time_independent: bool = False
     ):
         super().__init__(dt)
         self.normalize = normalize
@@ -259,9 +261,11 @@ class Rouchon2(_DEFixedStep, _DEAdaptiveStep):
         dt: Fixed time step, if specified all arguments specific to adaptive step sizing
             are ignored (`rtol`, `atol`, `safety_factor`, `min_factor`, `max_factor`
             and `max_steps`).
-        normalize: If True, the scheme is trace-preserving to machine precision, which
-            is the recommended option because it is much more stable. Otherwise, it is
-            only trace-preserving to the scheme order in the numerical step size.
+        normalize: If "cholesky", the scheme is trace-preserving to machine precision,
+            which is the recommended option because it is much more stable. If
+            "approx", a cheaper approximate renormalization is used. Otherwise,
+            normalization is disabled and the scheme is only trace-preserving to the
+            scheme order in the numerical step size.
         time_independent: If True, the scheme assumes time-independent operators
 
     Note-: Supported gradients
@@ -278,7 +282,7 @@ class Rouchon2(_DEFixedStep, _DEAdaptiveStep):
         Forward,
     )
 
-    normalize: bool = eqx.field(static=True, default=True)
+    normalize: str = eqx.field(static=True, default="cholesky")
     time_independent: bool = eqx.field(static=True, default=False)
 
     # dummy init to have the signature in the documentation
@@ -291,7 +295,7 @@ class Rouchon2(_DEFixedStep, _DEAdaptiveStep):
         max_factor: float = 5.0,
         max_steps: int = 100_000,
         dt: float | None = None,
-        normalize: bool = True,
+        normalize: str = "cholesky",
         time_independent: bool = False,
     ):
         _DEFixedStep.__init__(self, dt)  # ty: ignore[invalid-argument-type]
@@ -321,9 +325,11 @@ class Rouchon3(_DEFixedStep, _DEAdaptiveStep):
         dt: Fixed time step, if specified all arguments specific to adaptive step sizing
             are ignored (`rtol`, `atol`, `safety_factor`, `min_factor`, `max_factor`
             and `max_steps`).
-        normalize: If True, the scheme is trace-preserving to machine precision, which
-            is the recommended option because it is much more stable. Otherwise, it is
-            only trace-preserving to the scheme order in the numerical step size.
+        normalize: If "cholesky", the scheme is trace-preserving to machine precision,
+            which is the recommended option because it is much more stable. If
+            "approx", a cheaper approximate renormalization is used. Otherwise,
+            normalization is disabled and the scheme is only trace-preserving to the
+            scheme order in the numerical step size.
         time_independent: If True, the scheme assumes time-independent operators.
 
     Note-: Supported gradients
@@ -340,7 +346,7 @@ class Rouchon3(_DEFixedStep, _DEAdaptiveStep):
         Forward,
     )
 
-    normalize: bool = eqx.field(static=True, default=True)
+    normalize: str = eqx.field(static=True, default="cholesky")
     time_independent: bool = eqx.field(static=True, default=False)
 
     # dummy init to have the signature in the documentation
@@ -353,7 +359,7 @@ class Rouchon3(_DEFixedStep, _DEAdaptiveStep):
         max_factor: float = 5.0,
         max_steps: int = 100_000,
         dt: float | None = None,
-        normalize: bool = True,
+        normalize: str = "cholesky",
         time_independent: bool = False,
     ):
         _DEFixedStep.__init__(self, dt)  # ty: ignore[invalid-argument-type]
@@ -383,9 +389,11 @@ class Rouchon4(_DEFixedStep, _DEAdaptiveStep):
         dt: Fixed time step, if specified all arguments specific to adaptive step sizing
             are ignored (`rtol`, `atol`, `safety_factor`, `min_factor`, `max_factor`
             and `max_steps`).
-        normalize: If True, the scheme is trace-preserving to machine precision, which
-            is the recommended option because it is much more stable. Otherwise, it is
-            only trace-preserving to the scheme order in the numerical step size.
+        normalize: If "cholesky", the scheme is trace-preserving to machine precision,
+            which is the recommended option because it is much more stable. If
+            "approx", a cheaper approximate renormalization is used. Otherwise,
+            normalization is disabled and the scheme is only trace-preserving to the
+            scheme order in the numerical step size.
         time_independent: If True, the scheme assumes time-independent operators.
 
 
@@ -403,7 +411,7 @@ class Rouchon4(_DEFixedStep, _DEAdaptiveStep):
         Forward,
     )
 
-    normalize: bool = eqx.field(static=True, default=True)
+    normalize: str = eqx.field(static=True, default="cholesky")
     time_independent: bool = eqx.field(static=True, default=False)
 
     # dummy init to have the signature in the documentation
@@ -416,7 +424,7 @@ class Rouchon4(_DEFixedStep, _DEAdaptiveStep):
         max_factor: float = 5.0,
         max_steps: int = 100_000,
         dt: float | None = None,
-        normalize: bool = True,
+        normalize: str = "cholesky",
         time_independent: bool = False,
     ):
         _DEFixedStep.__init__(self, dt)  # ty: ignore[invalid-argument-type]
@@ -446,9 +454,11 @@ class Rouchon5(_DEFixedStep, _DEAdaptiveStep):
         dt: Fixed time step, if specified all arguments specific to adaptive step sizing
             are ignored (`rtol`, `atol`, `safety_factor`, `min_factor`, `max_factor`
             and `max_steps`).
-        normalize: If True, the scheme is trace-preserving to machine precision, which
-            is the recommended option because it is much more stable. Otherwise, it is
-            only trace-preserving to the scheme order in the numerical step size.
+        normalize: If "cholesky", the scheme is trace-preserving to machine precision,
+            which is the recommended option because it is much more stable. If
+            "approx", a cheaper approximate renormalization is used. Otherwise,
+            normalization is disabled and the scheme is only trace-preserving to the
+            scheme order in the numerical step size.
         time_independent: If True, the scheme assumes time-independent operators.
 
 
@@ -466,7 +476,7 @@ class Rouchon5(_DEFixedStep, _DEAdaptiveStep):
         Forward,
     )
 
-    normalize: bool = eqx.field(static=True, default=True)
+    normalize: str = eqx.field(static=True, default="cholesky")
     time_independent: bool = eqx.field(static=True, default=False)
 
     # dummy init to have the signature in the documentation
@@ -479,7 +489,7 @@ class Rouchon5(_DEFixedStep, _DEAdaptiveStep):
         max_factor: float = 5.0,
         max_steps: int = 100_000,
         dt: float | None = None,
-        normalize: bool = True,
+        normalize: str = "cholesky",
         time_independent: bool = False,
     ):
         _DEFixedStep.__init__(self, dt)  # ty: ignore[invalid-argument-type]

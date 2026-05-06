@@ -23,7 +23,12 @@ from .interfaces import (
     JSSEInterface,
     SolveInterface,
 )
-from .rouchon_integrator import MESolveFixedRouchon1Integrator, cholesky_normalize
+from .rouchon_integrator import (
+    MESolveFixedRouchon1Integrator,
+    cholesky_normalize,
+    approx_normalize,
+    _eps,
+)
 from .save_mixin import SolveSaveMixin
 
 
@@ -478,6 +483,40 @@ def cholesky_normalize_ket(Ms: list[QArray], psi: QArray) -> jax.Array:
     )[:, None]  # (n,) -> (n, 1)
 
 
+def approx_normalize_ket(
+    psi: QArray, H_op: QArray, Ls_tq: Sequence[QArray], dt: float, order: int
+) -> jax.Array:
+    # approximate renormalization for a ket: scale each component by the
+    # approximate factor computed in `approx_normalize`
+    n = psi.shape[-1]
+    norm_sq = jnp.zeros(n)
+
+    # H contribution
+    if H_op.layout == dia:
+        norm_sq = norm_sq + jnp.sum(
+            H_op.diags.real ** 2 + H_op.diags.imag ** 2, axis=-2
+        )
+    else:
+        H_arr = H_op.to_jax()
+        norm_sq = norm_sq + jnp.sum(H_arr.real ** 2 + H_arr.imag ** 2, axis=0)
+
+    # Lindblad contributions
+    for L_op in Ls_tq:
+        if L_op.layout == dia:
+            d = jnp.sum(L_op.diags.real ** 2 + L_op.diags.imag ** 2, axis=-2)
+        else:
+            L_arr = L_op.to_jax()
+            d = jnp.sum(L_arr.real ** 2 + L_arr.imag ** 2, axis=0)
+        norm_sq = norm_sq + 0.25 * d ** 2
+
+    preconditionner = jnp.sqrt(norm_sq + _eps)  # (n,)
+    pd = preconditionner[:, None] * dt
+    scale = 1 + (pd.real ** 2 + pd.imag ** 2 + _eps) ** ((order + 1) / 2)
+
+    psi_jax = psi.to_jax() / scale[:, None]
+    return psi_jax
+
+
 class DSSESolveRouchon1Integrator(DSSEFixedStepIntegrator):
     """Integrator solving the diffusive SSE with the Rouchon1 method."""
 
@@ -503,8 +542,12 @@ class DSSESolveRouchon1Integrator(DSSEFixedStepIntegrator):
         Ms_average = MESolveFixedRouchon1Integrator.Ms(
             H, L, self.dt, self.method.exact_expm
         )
-        if self.method.normalize:
+        if self.method.normalize == "cholesky":
             psi = cholesky_normalize_ket(Ms_average, psi)
+        elif self.method.normalize == "approx":
+            H_tq = self.H(t + self.dt / 2)
+            Ls_tq = self.L(t + self.dt / 2)
+            psi = approx_normalize_ket(psi, H_tq, Ls_tq, self.dt, 1)
 
         M_dY = Ms_average[0] + sum([_dY * _L for _dY, _L in zip(dY, L, strict=True)])
 
@@ -589,8 +632,12 @@ class DSMESolveRouchon1Integrator(DSMEFixedStepIntegrator, SolveInterface):
         Ms_average = MESolveFixedRouchon1Integrator.Ms(
             H, L, self.dt, self.method.exact_expm
         )
-        if self.method.normalize:
+        if self.method.normalize == "cholesky":
             rho = cholesky_normalize(Ms_average, rho)
+        elif self.method.normalize == "approx":
+            H_tq = self.H(t + self.dt / 2)
+            Ls_tq = self.L(t + self.dt / 2)
+            rho = approx_normalize(rho, H_tq, Ls_tq, self.dt, 1)
 
         M_dY = Ms_average[0] + sum(
             [

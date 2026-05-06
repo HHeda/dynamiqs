@@ -96,12 +96,12 @@ def cholesky_normalize(
     rho = rho.to_jax()
     # solve T^† @ x = rho => x = T^{†(-1)} @ rho
     rho = jax.lax.linalg.triangular_solve(
-        T, rho, lower=True, transpose_a=True, conjugate_a=True
+        T, rho, lower=True, transpose_a=True, conjugate_a=True, left_side=True
     )
     # solve x @ T = rho => x = rho @ T^{-1}
     return jax.lax.linalg.triangular_solve(T, rho, lower=True, left_side=False)
 
-def approx_renormalize(rho: QArray, H_op: QArray, Ls_tq: Sequence[QArray], dt: float, order: int) -> QArray:
+def approx_normalize(rho: QArray, H_op: QArray, Ls_tq: Sequence[QArray], dt: float, order: int) -> QArray:
     n = rho.shape[-1]
     norm_sq = jnp.zeros(n)
     dims = rho.dims
@@ -128,9 +128,19 @@ def approx_renormalize(rho: QArray, H_op: QArray, Ls_tq: Sequence[QArray], dt: f
 
     preconditionner = jnp.sqrt(norm_sq + _eps)  # (n,)
 
-    pd = preconditionner[:, None] * dt
-    scale = 1 + (pd.real ** 2 + pd.imag ** 2 + _eps) ** ((order + 1) / 2)
-    return asqarray(rho.to_jax() / scale[:, None] / scale[None, :], dims=dims)
+    pd = preconditionner[:, None]*dt
+
+    lmax = order/2-1/4
+    lmaxm = jnp.floor(lmax)
+    lmaxp = jnp.ceil(lmax)
+    flmaxm = -lmaxm**2 + (order-1/2)*lmaxm + order
+    flmaxp = -lmaxp**2 + (order-1/2)*lmaxp + order
+    pow = jnp.max(jnp.array([flmaxm, flmaxp]))
+    # pow = 2*order
+    s = 1
+    scale = ((1 + pd ** ((pow + 1)))**s).squeeze()  # (n,)
+    res = asqarray(rho.to_jax() / scale[:, None] / scale[None, :], dims=dims)
+    return res
 
 
 
@@ -409,6 +419,9 @@ class MESolveFixedRouchonIntegrator(MESolveDiffraxIntegrator):
     """Integrator computing the time evolution of the Lindblad master equation using a
     fixed step Rouchon method.
     """
+    @property
+    def order(self) -> int:
+        pass
 
     @property
     def terms(self) -> dx.AbstractTerm:
@@ -422,11 +435,19 @@ class MESolveFixedRouchonIntegrator(MESolveDiffraxIntegrator):
             dt = t1 - t0
             Msss = self._kraus_ops(t, dt)
 
-            if self.method.normalize:
+            if self.method.normalize == "cholesky":
                 rho = cholesky_normalize(Msss, rho)
-
+            elif self.method.normalize == "approx":
+                H_tq = self.H(t + dt / 2)
+                Ls_tq = self.L(t + dt / 2)
+                rho = approx_normalize(rho, H_tq, Ls_tq, dt, self.order)
+            res = sum([apply_nested_map(rho, Mss) for Mss in Msss])
+            if self.method.normalize == "trace":
+                res = res.unit()
+            elif self.method.normalize == "approx":
+                res = res.unit()
             # for fixed step size, we return None for the error estimate
-            return sum([apply_nested_map(rho, Mss) for Mss in Msss]), None
+            return res, None
 
         return AbstractRouchonTerm(kraus_map)
 
@@ -449,6 +470,10 @@ class MESolveFixedRouchon1Integrator(MESolveFixedRouchonIntegrator):
     """Integrator computing the time evolution of the Lindblad master equation using the
     fixed step Rouchon 1 method.
     """
+
+    @property
+    def order(self) -> int:
+        return 1
 
     @staticmethod
     def Msss(
@@ -482,7 +507,10 @@ class MESolveFixedRouchon2Integrator(MESolveFixedRouchonIntegrator):
     """Integrator computing the time evolution of the Lindblad master equation using the
     fixed step Rouchon 2 method.
     """
-
+    @property
+    def order(self) -> int:
+        return 2
+    
     @staticmethod
     def Msss(
         H: Callable[[RealScalarLike], QArray],
@@ -522,6 +550,10 @@ class MESolveFixedRouchon3Integrator(MESolveFixedRouchonIntegrator):
     fixed step Rouchon 3 method.
     """
 
+    @property
+    def order(self) -> int:
+        return 3
+    
     @staticmethod
     def Msss(
         H: Callable[[RealScalarLike], QArray],
@@ -573,9 +605,25 @@ class MESolveFixedRouchon3Integrator(MESolveFixedRouchonIntegrator):
         # L3o3 = self.L(t+dt)
         e2o3_to_e3o3 = solve_prop(1, 2 / 3)
 
+        
+        # o3m = (3 - jnp.sqrt(3)) / 6
+        # o3p = (3 + jnp.sqrt(3)) / 6
+        # Lt1o3p = L(t + o3p * dt)
+        # Lt1o3m = L(t + o3m * dt)
+        # e1o3m = U_at(o3m)
+        # e1o3p = U_at(o3p)
+
         J0 = [[[e3o3]]]
         J1a = [[[(jnp.sqrt(3 * dt / 4) * e2o3_to_e3o3 @ _L @ e2o3) for _L in L2o3]]]
         J1b = [[[jnp.sqrt(dt / 4) * e3o3 @ _L for _L in L0o3]]]
+
+        # # 1 jumps: 2 operators
+        # J1a = [
+        #     [[jnp.sqrt(dt / 2) * solve_prop(1.0, o3p) @ _L @ e1o3p for _L in Lt1o3p]]
+        # ]
+        # J1b = [
+        #     [[jnp.sqrt(dt / 2) * solve_prop(1.0, o3m) @ _L @ e1o3m for _L in Lt1o3m]]
+        # ]
         J2 = [
             [
                 [jnp.sqrt(dt**2 / 2) * e2o3_to_e3o3 @ _L1 for _L1 in L2o3],
@@ -590,6 +638,9 @@ class MESolveFixedRouchon4Integrator(MESolveFixedRouchonIntegrator):
     """Integrator computing the time evolution of the Lindblad master equation using the
     fixed step Rouchon 4 method.
     """
+    @property
+    def order(self) -> int:
+        return 4
 
     @staticmethod
     def Msss(
@@ -695,6 +746,9 @@ class MESolveFixedRouchon5Integrator(MESolveFixedRouchonIntegrator):
     """Integrator computing the time evolution of the Lindblad master equation using the
     fixed step Rouchon 4 method.
     """
+    @property
+    def order(self) -> int:
+        return 5
 
     @staticmethod
     def _compute_rk5_stages(
@@ -931,15 +985,37 @@ class MESolveAdaptiveRouchon2Integrator(MESolveAdaptiveRouchonIntegrator):
             Msss_1 = MESolveFixedRouchon1Integrator.Msss(
                 H, L, t, dt, self.method.time_independent
             )
-            rho_1 = cholesky_normalize(Msss_1, rho) if self.method.normalize else rho
+            if self.method.normalize == "cholesky":
+                rho_1 = cholesky_normalize(Msss_1, rho)
+            elif self.method.normalize == "approx":
+                H_tq = self.H(t + dt / 2) 
+                Ls_tq = self.L(t + dt / 2)
+                rho_1 = approx_normalize(rho, H_tq, Ls_tq, dt, 1)
+            else:
+                rho_1 = rho
             rho_1 = sum([apply_nested_map(rho_1, Mss) for Mss in Msss_1])
+            if self.method.normalize == "trace":
+                rho_1 = rho_1.unit()
+            elif self.method.normalize == "approx":
+                rho_1 = rho_1.unit()
 
             # === second order
             Msss_2 = MESolveFixedRouchon2Integrator.Msss(
                 H, L, t, dt, self.method.time_independent
             )
-            rho_2 = cholesky_normalize(Msss_2, rho) if self.method.normalize else rho
+            if self.method.normalize == "cholesky":
+                rho_2 = cholesky_normalize(Msss_2, rho)
+            elif self.method.normalize == "approx":
+                H_tq = self.H(t + dt / 2) 
+                Ls_tq = self.L(t + dt / 2)
+                rho_2 = approx_normalize(rho, H_tq, Ls_tq, dt, 2)
+            else:
+                rho_2 = rho
             rho_2 = sum([apply_nested_map(rho_2, Mss) for Mss in Msss_2])
+            if self.method.normalize == "trace":
+                rho_2 = rho_2.unit()
+            elif self.method.normalize == "approx":
+                rho_2 = rho_2.unit()
 
             return rho_2, 0.5 * (rho_2 - rho_1)
 
@@ -964,15 +1040,38 @@ class MESolveAdaptiveRouchon3Integrator(MESolveAdaptiveRouchonIntegrator):
             Msss_2 = MESolveFixedRouchon2Integrator.Msss(
                 H, L, t, dt, self.method.time_independent
             )
-            rho_2 = cholesky_normalize(Msss_2, rho) if self.method.normalize else rho
+
+            if self.method.normalize == "cholesky":
+                rho_2 = cholesky_normalize(Msss_2, rho)
+            elif self.method.normalize == "approx":
+                H_tq = self.H(t + dt / 2) 
+                Ls_tq = self.L(t + dt / 2)
+                rho_2 = approx_normalize(rho, H_tq, Ls_tq, dt, 2)
+            else:
+                rho_2 = rho
             rho_2 = sum([apply_nested_map(rho_2, Mss) for Mss in Msss_2])
+            if self.method.normalize == "trace":
+                rho_2 = rho_2.unit()
+            elif self.method.normalize == "approx":
+                rho_2 = rho_2.unit()
 
             # === third order
             Msss_3 = MESolveFixedRouchon3Integrator.Msss(
                 H, L, t, dt, self.method.time_independent
             )
-            rho_3 = cholesky_normalize(Msss_3, rho) if self.method.normalize else rho
+            if self.method.normalize == "cholesky":
+                rho_3 = cholesky_normalize(Msss_3, rho)
+            elif self.method.normalize == "approx":
+                H_tq = self.H(t + dt / 2) 
+                Ls_tq = self.L(t + dt / 2)
+                rho_3 = approx_normalize(rho, H_tq, Ls_tq, dt, 3)
+            else:
+                rho_3 = rho
             rho_3 = sum([apply_nested_map(rho_3, Mss) for Mss in Msss_3])
+            if self.method.normalize == "trace":
+                rho_3 = rho_3.unit()
+            elif self.method.normalize == "approx":
+                rho_3 = rho_3.unit()
             return rho_3, 0.5 * (rho_3 - rho_2)
 
         return AbstractRouchonTerm(kraus_map)
@@ -996,15 +1095,37 @@ class MESolveAdaptiveRouchon4Integrator(MESolveAdaptiveRouchonIntegrator):
             Msss_3 = MESolveFixedRouchon3Integrator.Msss(
                 H, L, t, dt, self.method.time_independent
             )
-            rho_3 = cholesky_normalize(Msss_3, rho) if self.method.normalize else rho
+            if self.method.normalize == "cholesky":
+                rho_3 = cholesky_normalize(Msss_3, rho)
+            elif self.method.normalize == "approx":
+                H_tq = self.H(t + dt / 2) 
+                Ls_tq = self.L(t + dt / 2)
+                rho_3 = approx_normalize(rho, H_tq, Ls_tq, dt, 3)
+            else:
+                rho_3 = rho
             rho_3 = sum([apply_nested_map(rho_3, Mss) for Mss in Msss_3])
+            if self.method.normalize == "trace":
+                rho_3 = rho_3.unit()
+            elif self.method.normalize == "approx":
+                rho_3 = rho_3.unit()
 
             # === fourth order
             Msss_4 = MESolveFixedRouchon4Integrator.Msss(
                 H, L, t, dt, self.method.time_independent
             )
-            rho_4 = cholesky_normalize(Msss_4, rho) if self.method.normalize else rho
+            if self.method.normalize == "cholesky":
+                rho_4 = cholesky_normalize(Msss_4, rho)
+            elif self.method.normalize == "approx":
+                H_tq = self.H(t + dt / 2) 
+                Ls_tq = self.L(t + dt / 2)
+                rho_4 = approx_normalize(rho, H_tq, Ls_tq, dt, 4)
+            else:
+                rho_4 = rho
             rho_4 = sum([apply_nested_map(rho_4, Mss) for Mss in Msss_4])
+            if self.method.normalize == "trace":
+                rho_4 = rho_4.unit()
+            elif self.method.normalize == "approx":
+                rho_4 = rho_4.unit()
             return rho_4, 0.5 * (rho_4 - rho_3)
 
         return AbstractRouchonTerm(kraus_map)
@@ -1028,15 +1149,36 @@ class MESolveAdaptiveRouchon5Integrator(MESolveAdaptiveRouchonIntegrator):
             Msss_4 = MESolveFixedRouchon4Integrator.Msss(
                 H, L, t, dt, self.method.time_independent
             )
-            rho_4 = cholesky_normalize(Msss_4, rho) if self.method.normalize else rho
+            if self.method.normalize == "cholesky":
+                rho_4 = cholesky_normalize(Msss_4, rho)
+            elif self.method.normalize == "approx":
+                H_tq = self.H(t + dt / 2) 
+                Ls_tq = self.L(t + dt / 2)
+                rho_4 = approx_normalize(rho, H_tq, Ls_tq, dt, 4)
+            else:
+                rho_4 = rho
             rho_4 = sum([apply_nested_map(rho_4, Mss) for Mss in Msss_4])
-
+            if self.method.normalize == "trace":
+                rho_4 = rho_4.unit()
+            elif self.method.normalize == "approx":
+                rho_4 = rho_4.unit()
             # === fifth order
             Msss_5 = MESolveFixedRouchon5Integrator.Msss(
                 H, L, t, dt, self.method.time_independent
             )
-            rho_5 = cholesky_normalize(Msss_5, rho) if self.method.normalize else rho
+            if self.method.normalize == "cholesky":
+                rho_5 = cholesky_normalize(Msss_5, rho)
+            elif self.method.normalize == "approx":
+                H_tq = self.H(t + dt / 2) 
+                Ls_tq = self.L(t + dt / 2)
+                rho_5 = approx_normalize(rho, H_tq, Ls_tq, dt, 5)
+            else:
+                rho_5 = rho
             rho_5 = sum([apply_nested_map(rho_5, Mss) for Mss in Msss_5])
+            if self.method.normalize == "trace":
+                rho_5 = rho_5.unit()
+            elif self.method.normalize == "approx":
+                rho_5 = rho_5.unit()
             return rho_5, 0.5 * (rho_5 - rho_4)
 
         return AbstractRouchonTerm(kraus_map)
