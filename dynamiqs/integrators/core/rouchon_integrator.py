@@ -101,45 +101,29 @@ def cholesky_normalize(
     # solve x @ T = rho => x = rho @ T^{-1}
     return jax.lax.linalg.triangular_solve(T, rho, lower=True, left_side=False)
 
-def approx_normalize(rho: QArray, H_op: QArray, Ls_tq: Sequence[QArray], dt: float, order: int) -> QArray:
+def approx_normalize(
+    Msss: Sequence[Sequence[Sequence[QArray]]], rho: QArray
+) -> jax.Array:
     n = rho.shape[-1]
     norm_sq = jnp.zeros(n)
     dims = rho.dims
 
+    S = sum([compute_partial_S(rho, Mss) for Mss in Msss])
+
     # ---- H contribution: ||H[:, j]||² ----
-    if H_op.layout == dia:
+    if S.layout == dia:
         norm_sq = norm_sq + jnp.sum(
-            H_op.diags.real ** 2 + H_op.diags.imag ** 2, axis=-2
+            S.diags.real ** 2 + S.diags.imag ** 2, axis=-2
         )
     else:
-        H_arr = H_op.to_jax()
+        S_arr = S.to_jax()
         norm_sq = norm_sq + jnp.sum(
-            H_arr.real ** 2 + H_arr.imag ** 2, axis=0
+            S_arr.real ** 2 + S_arr.imag ** 2, axis=0
         )
-
-    # ---- Lindblad contributions: (0.5 diag(L†L)[j])² ----
-    for L_op in Ls_tq:
-        if L_op.layout == dia:
-            d = jnp.sum(L_op.diags.real ** 2 + L_op.diags.imag ** 2, axis=-2)
-        else:
-            L_arr = L_op.to_jax()
-            d = jnp.sum(L_arr.real ** 2 + L_arr.imag ** 2, axis=0)
-        norm_sq = norm_sq + 0.25 * d ** 2
-
     preconditionner = jnp.sqrt(norm_sq + _eps)  # (n,)
+    spd = jnp.sqrt(preconditionner)
 
-    pd = preconditionner[:, None]*dt
-
-    lmax = order/2-1/4
-    lmaxm = jnp.floor(lmax)
-    lmaxp = jnp.ceil(lmax)
-    flmaxm = -lmaxm**2 + (order-1/2)*lmaxm + order
-    flmaxp = -lmaxp**2 + (order-1/2)*lmaxp + order
-    pow = jnp.max(jnp.array([flmaxm, flmaxp]))
-    # pow = 2*order
-    s = 1
-    scale = ((1 + pd ** ((pow + 1)))**s).squeeze()  # (n,)
-    res = asqarray(rho.to_jax() / scale[:, None] / scale[None, :], dims=dims)
+    res = asqarray(rho.to_jax() / spd[:, None] / spd[None, :], dims=dims)
     return res
 
 
@@ -438,9 +422,7 @@ class MESolveFixedRouchonIntegrator(MESolveDiffraxIntegrator):
             if self.method.normalize == "cholesky":
                 rho = cholesky_normalize(Msss, rho)
             elif self.method.normalize == "approx":
-                H_tq = self.H(t + dt / 2)
-                Ls_tq = self.L(t + dt / 2)
-                rho = approx_normalize(rho, H_tq, Ls_tq, dt, self.order)
+                rho = approx_normalize(Msss, rho)
             res = sum([apply_nested_map(rho, Mss) for Mss in Msss])
             if self.method.normalize == "trace":
                 res = res.unit()
@@ -988,9 +970,7 @@ class MESolveAdaptiveRouchon2Integrator(MESolveAdaptiveRouchonIntegrator):
             if self.method.normalize == "cholesky":
                 rho_1 = cholesky_normalize(Msss_1, rho)
             elif self.method.normalize == "approx":
-                H_tq = self.H(t + dt / 2) 
-                Ls_tq = self.L(t + dt / 2)
-                rho_1 = approx_normalize(rho, H_tq, Ls_tq, dt, 1)
+                rho_1 = approx_normalize(Msss_1, rho)
             else:
                 rho_1 = rho
             rho_1 = sum([apply_nested_map(rho_1, Mss) for Mss in Msss_1])
@@ -1006,9 +986,7 @@ class MESolveAdaptiveRouchon2Integrator(MESolveAdaptiveRouchonIntegrator):
             if self.method.normalize == "cholesky":
                 rho_2 = cholesky_normalize(Msss_2, rho)
             elif self.method.normalize == "approx":
-                H_tq = self.H(t + dt / 2) 
-                Ls_tq = self.L(t + dt / 2)
-                rho_2 = approx_normalize(rho, H_tq, Ls_tq, dt, 2)
+                rho_2 = approx_normalize(Msss_2, rho)
             else:
                 rho_2 = rho
             rho_2 = sum([apply_nested_map(rho_2, Mss) for Mss in Msss_2])
@@ -1044,9 +1022,7 @@ class MESolveAdaptiveRouchon3Integrator(MESolveAdaptiveRouchonIntegrator):
             if self.method.normalize == "cholesky":
                 rho_2 = cholesky_normalize(Msss_2, rho)
             elif self.method.normalize == "approx":
-                H_tq = self.H(t + dt / 2) 
-                Ls_tq = self.L(t + dt / 2)
-                rho_2 = approx_normalize(rho, H_tq, Ls_tq, dt, 2)
+                rho_2 = approx_normalize(Msss_2, rho)
             else:
                 rho_2 = rho
             rho_2 = sum([apply_nested_map(rho_2, Mss) for Mss in Msss_2])
@@ -1062,9 +1038,7 @@ class MESolveAdaptiveRouchon3Integrator(MESolveAdaptiveRouchonIntegrator):
             if self.method.normalize == "cholesky":
                 rho_3 = cholesky_normalize(Msss_3, rho)
             elif self.method.normalize == "approx":
-                H_tq = self.H(t + dt / 2) 
-                Ls_tq = self.L(t + dt / 2)
-                rho_3 = approx_normalize(rho, H_tq, Ls_tq, dt, 3)
+                rho_3 = approx_normalize(Msss_3, rho)
             else:
                 rho_3 = rho
             rho_3 = sum([apply_nested_map(rho_3, Mss) for Mss in Msss_3])
@@ -1098,9 +1072,7 @@ class MESolveAdaptiveRouchon4Integrator(MESolveAdaptiveRouchonIntegrator):
             if self.method.normalize == "cholesky":
                 rho_3 = cholesky_normalize(Msss_3, rho)
             elif self.method.normalize == "approx":
-                H_tq = self.H(t + dt / 2) 
-                Ls_tq = self.L(t + dt / 2)
-                rho_3 = approx_normalize(rho, H_tq, Ls_tq, dt, 3)
+                rho_3 = approx_normalize(Msss_3, rho)
             else:
                 rho_3 = rho
             rho_3 = sum([apply_nested_map(rho_3, Mss) for Mss in Msss_3])
@@ -1116,9 +1088,7 @@ class MESolveAdaptiveRouchon4Integrator(MESolveAdaptiveRouchonIntegrator):
             if self.method.normalize == "cholesky":
                 rho_4 = cholesky_normalize(Msss_4, rho)
             elif self.method.normalize == "approx":
-                H_tq = self.H(t + dt / 2) 
-                Ls_tq = self.L(t + dt / 2)
-                rho_4 = approx_normalize(rho, H_tq, Ls_tq, dt, 4)
+                rho_4 = approx_normalize(Msss_4, rho)
             else:
                 rho_4 = rho
             rho_4 = sum([apply_nested_map(rho_4, Mss) for Mss in Msss_4])
@@ -1152,9 +1122,7 @@ class MESolveAdaptiveRouchon5Integrator(MESolveAdaptiveRouchonIntegrator):
             if self.method.normalize == "cholesky":
                 rho_4 = cholesky_normalize(Msss_4, rho)
             elif self.method.normalize == "approx":
-                H_tq = self.H(t + dt / 2) 
-                Ls_tq = self.L(t + dt / 2)
-                rho_4 = approx_normalize(rho, H_tq, Ls_tq, dt, 4)
+                rho_4 = approx_normalize(Msss_4, rho)
             else:
                 rho_4 = rho
             rho_4 = sum([apply_nested_map(rho_4, Mss) for Mss in Msss_4])
@@ -1169,9 +1137,7 @@ class MESolveAdaptiveRouchon5Integrator(MESolveAdaptiveRouchonIntegrator):
             if self.method.normalize == "cholesky":
                 rho_5 = cholesky_normalize(Msss_5, rho)
             elif self.method.normalize == "approx":
-                H_tq = self.H(t + dt / 2) 
-                Ls_tq = self.L(t + dt / 2)
-                rho_5 = approx_normalize(rho, H_tq, Ls_tq, dt, 5)
+                rho_5 = approx_normalize(Msss_5, rho)
             else:
                 rho_5 = rho
             rho_5 = sum([apply_nested_map(rho_5, Mss) for Mss in Msss_5])
