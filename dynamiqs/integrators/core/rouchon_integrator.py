@@ -138,7 +138,7 @@ def approx_normalize(rho: QArray, H_op: QArray, Ls_tq: Sequence[QArray], dt: flo
     pow = jnp.max(jnp.array([flmaxm, flmaxp]))
     # pow = 2*order
     s = 1
-    scale = ((1 + pd ** ((pow + 1)))**s).squeeze()  # (n,)
+    scale = ((1 + 0.5 * pd ** (pow + 1) + 0.5 * pd ** (order + 1))).squeeze()  # (n,)
     res = asqarray(rho.to_jax() / scale[:, None] / scale[None, :], dims=dims)
     return res
 
